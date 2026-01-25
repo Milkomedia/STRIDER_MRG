@@ -1,0 +1,15 @@
+.vscode/
+
+# build artifacts
+build/
+
+# python
+__pycache__/
+
+# Acados
+generated/
+*.json
+
+# macOS
+.DS_Store
+Icon?
