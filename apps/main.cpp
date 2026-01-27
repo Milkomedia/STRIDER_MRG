@@ -373,7 +373,7 @@ int main() {
     else {teensy.write_zeros();}
 
     // --- Dynamixel write [355ns] ---
-    // if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
+    if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
     // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
     {

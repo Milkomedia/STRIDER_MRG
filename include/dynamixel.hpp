@@ -76,7 +76,7 @@ private:
   };
 
   // Joint sign of each joint index
-  inline static constexpr int JOINT_SIGN[JOINT_NUM] = {-1, -1,  1, -1,  1};
+  inline static constexpr int JOINT_SIGN[JOINT_NUM] = {1, -1, -1, 1, 1};
 
   struct Gains {
     uint16_t pos_P, pos_I, pos_D;
@@ -84,11 +84,11 @@ private:
   };
 
   inline static constexpr Gains GAINS[JOINT_NUM] = {
-    {800, 0, 0, 100, 300}, // j0
-    {800, 0, 0, 100, 300}, // j1
-    {800, 0, 0, 100, 300}, // j2
-    {800, 0, 0, 100, 300}, // j3
-    {800, 0, 0, 100, 300}, // j4
+    {  800,    0,    0,  100,  20  }, // j0
+    { 2562, 1348,  809, 1079, 3843 }, // j1
+    { 2500, 1341, 3843, 1314, 9102 }, // j2
+    { 2700,  390,  100, 2023, 2023 }, // j3
+    {  700,    0,    0,  100, 1920 }, // j4
   };
 
   uint8_t goal_param_[DXL_NUM][4] = {{0}};
@@ -115,7 +115,7 @@ private:
   // Convert rad <-> ppr
   static inline int rad_2_ppr_(int joint_idx, double rad) {
     if (joint_idx == 0) {
-      const double ppr = JOINT_SIGN[joint_idx] * rad * 4074.3665431525; // (6.25 * 2048 / pi)
+      const double ppr = JOINT_SIGN[joint_idx] * rad * 4074.3665431525 + 2048.0; // (6.25 * 2048 / pi)
       return static_cast<int>(ppr);
     }
     const double ppr = JOINT_SIGN[joint_idx] * rad * 651.8986469044 + 2048.0; // (2048 / pi)
@@ -124,7 +124,7 @@ private:
 
   static inline double ppr_2_rad_(int joint_idx, int ppr) {
     if (joint_idx == 0) {
-      return JOINT_SIGN[joint_idx] * static_cast<double>(ppr) * 0.0002454369260617; // (pi / 6.25 / 2048)
+      return JOINT_SIGN[joint_idx] * (static_cast<double>(ppr) - 2048.0 ) * 0.0002454369260617; // (pi / 6.25 / 2048)
     }
     return JOINT_SIGN[joint_idx] * (static_cast<double>(ppr) - 2048.0) * 0.0015339807878856; // (pi / 2048)
   }

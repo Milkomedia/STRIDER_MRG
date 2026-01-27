@@ -43,8 +43,8 @@ static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Z_RANGE       = 1.0;   // [m] k mapped to [0, +k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
-static constexpr double SBUS_L_RANGE[2]    = {0.4, 0.6};     // [m]
-static constexpr double SBUS_COTZ_RANGE[2] = {-0.05, -0.3};  // [m]
+static constexpr double SBUS_L_RANGE[2]    = { 0.45, 0.55};  // [m]
+static constexpr double SBUS_COTZ_RANGE[2] = {-0.1, -0.25};  // [m]
 
 // ===== OptiTrack offsets =====
 static constexpr double OPTI_X_OFFSET  = 0.000; // [m]
