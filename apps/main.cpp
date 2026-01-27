@@ -213,6 +213,8 @@ int main() {
         }
         else if (phase == Phase::MRG_FLIGHT) {
           if (sbus_frame.ch[7] == 1024) {
+            cmd.d_theta.setZero();         // reset previous optimal u
+            l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
             phase = Phase::GAC_FLIGHT;
             std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
@@ -220,6 +222,8 @@ int main() {
         }
         else if (phase == Phase::MRG_ACTIVE_COT) {
           if (sbus_frame.ch[7] == 1024) {
+            cmd.d_theta.setZero();         // reset previous optimal u
+            l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
             phase = Phase::GAC_FLIGHT;
             std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
@@ -304,7 +308,15 @@ int main() {
               g_mpc_input.key = mpc_key;
               g_mpc_input.has = true;
               mpc_cv.notify_one();
-    }}}}}
+            }
+          }
+        }
+      }
+      else { // cot goes to zero when MPC deactivated
+        cmd.r_cot(0) *= 0.995;
+        cmd.r_cot(1) *= 0.995;
+      }
+    }
 
     bool got_mpc = false;
     { // check got_mpc
