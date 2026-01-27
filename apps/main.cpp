@@ -150,7 +150,7 @@ int main() {
     else {std::fprintf(stdout, "Good   ]------||\n ||------------------------------------||\n\n\n"); std::fflush(stdout);}
 
     // SBUS toggle check.
-    if (sbus_frame.ch[7] != 352 || sbus_frame.ch[8] != 352) {std::fprintf(stdout, "\n\n SBUS toggle set to wrong.\n Check the transmitter -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+    if (sbus_frame.ch[7] != 1024 || sbus_frame.ch[8] != 352) {std::fprintf(stdout, "\n\n SBUS toggle set to wrong.\n Check the transmitter -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
   
     phase = Phase::ARMED;
   }
@@ -202,25 +202,37 @@ int main() {
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
+            phase = Phase::MRG_ACTIVE_COT;
+            std::fprintf(stdout, "flight state -> [MRG_ACTIVE_COT]\n"); std::fflush(stdout);
+          }
+          if (sbus_frame.ch[7] == 352) {
+            g_mpc_activated.store(true, std::memory_order_relaxed);
             phase = Phase::MRG_FLIGHT;
-            std::fprintf(stdout, "flight state -> [MRG_FLIGHT]\n"); std::fflush(stdout);
+            std::fprintf(stdout, "flight state -> [MRG]\n"); std::fflush(stdout);
           }
         }
         else if (phase == Phase::MRG_FLIGHT) {
-          if (sbus_frame.ch[7] == 352) {
+          if (sbus_frame.ch[7] == 1024) {
+            g_mpc_activated.store(false, std::memory_order_relaxed);
+            phase = Phase::GAC_FLIGHT;
+            std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
+          }
+        }
+        else if (phase == Phase::MRG_ACTIVE_COT) {
+          if (sbus_frame.ch[7] == 1024) {
             g_mpc_activated.store(false, std::memory_order_relaxed);
             phase = Phase::GAC_FLIGHT;
             std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
           }
         }
         else if (phase == Phase::ARMED) {
-          if (sbus_frame.ch[7] != 352) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (sbus_frame.ch[7] != 1024) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
             if (sbus_frame.ch[8] == 1024) {phase = Phase::IDLE;std::fprintf(stdout, "flight state -> [IDLE]\n"); std::fflush(stdout);}
           }
         }
         else if (phase == Phase::IDLE) {
-          if (sbus_frame.ch[7] != 352) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (sbus_frame.ch[7] != 1024) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
             if (sbus_frame.ch[8] != 1024) {
               if(sbus_frame.ch[8] == 1360) {phase = Phase::RISING;std::fprintf(stdout, "flight state -> [RISING]\n"); std::fflush(stdout);}
@@ -286,7 +298,8 @@ int main() {
               g_mpc_input.log(n++) = cmd.pos(0); g_mpc_input.log(n++) = cmd.pos(1); g_mpc_input.log(n++) = cmd.pos(2); // pos_des
               g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; // F1234
 
-              g_mpc_input.debug = true;
+              if (phase == Phase::MRG_ACTIVE_COT) {g_mpc_input.use_cot = true;}
+              else if (phase == Phase::MRG_FLIGHT) {g_mpc_input.use_cot = false;}
               g_mpc_input.t = now;
               g_mpc_input.key = mpc_key;
               g_mpc_input.has = true;

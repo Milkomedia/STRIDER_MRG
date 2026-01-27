@@ -12,7 +12,7 @@
 [chn  4] -> SA *
 [chn  5] -> SH *
 [chn  6] -> SD *
-[chn  7] -> SG MRG on(1696) / off(352) command
+[chn  7] -> SG yes cot (1696) / GAC (1024) / no cot (352) command
 [chn  8] -> SE armed(352) / idle(1024) / rising(1696) command
 [chn  9] -> SF kill command
 [chn 10] -> LD CoT z command
