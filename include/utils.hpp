@@ -40,6 +40,91 @@ struct Command {
   Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.15);   // desired CoT position [m], z-element can be manually changable by SBUS
 };
 
+
+struct Diff {
+  double last_x_{0.0};
+  bool has_last_{false};
+
+  std::chrono::steady_clock::time_point last_time_;
+  bool has_last_time_{false};
+
+  double dt_min_ = 1.0 / 10000.0;
+
+  inline void reset() {
+    has_last_ = false;
+    has_last_time_ = false;
+    last_x_ = 0.0;
+  }
+
+  inline double update(const double x, const std::chrono::steady_clock::time_point& now) {
+    double dt = 1e12;
+    if (has_last_time_) { dt = std::chrono::duration<double>(now - last_time_).count(); }
+    last_time_ = now;
+    has_last_time_ = true;
+
+    dt = std::max(dt, dt_min_);
+
+    if (!has_last_) {
+      last_x_ = x;
+      has_last_ = true;
+      return 0.0;
+    }
+
+    const double dx = (x - last_x_) / dt;
+    last_x_ = x;
+    return dx;
+  }
+};
+
+
+struct Butterworth2nd {
+  // 2nd-order Butterworth states
+  double bf_x1_{0.0};
+  double bf_x2_{0.0};
+
+  // cutoff related (rad/s)
+  double wc_{0.0};
+  double wc2_{0.0};
+  double wc_sqrt2_{0.0};
+
+  std::chrono::steady_clock::time_point last_time_;
+  bool has_last_time_{false};
+
+  explicit Butterworth2nd(const double cutoff_hz)
+  {
+    wc_ = 2.0 * M_PI * cutoff_hz;
+    wc2_ = wc_ * wc_;
+    wc_sqrt2_ = std::sqrt(2.0) * wc_;
+  }
+
+  inline double update(const double raw, const std::chrono::steady_clock::time_point& now_time)
+  {
+    double dt = 1e12;
+    if (has_last_time_) {
+      dt = std::chrono::duration<double>(now_time - last_time_).count();
+    }
+    last_time_ = now_time;
+    has_last_time_ = true;
+
+    if (dt <= 0.0 || dt > 1.0) { return raw; }
+
+    const double dx1 = -wc_sqrt2_ * bf_x1_ - wc2_ * bf_x2_ + raw;
+    const double dx2 = bf_x1_;
+
+    bf_x1_ += dx1 * dt;
+    bf_x2_ += dx2 * dt;
+
+    return wc2_ * bf_x2_;
+  }
+
+  inline void reset()
+  {
+    bf_x1_ = 0.0;
+    bf_x2_ = 0.0;
+    has_last_time_ = false;
+  }
+};
+
 // --------- [ Math utility ] ---------
 static inline constexpr double inv_sqrt2 = 0.7071067811865474617150084668537601828575;  // 1/sqrt(2)
 static inline constexpr double sqrt2 = 1.4142135623730951454746218587388284504414;      // sqrt(2)

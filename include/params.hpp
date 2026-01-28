@@ -50,6 +50,10 @@ static constexpr double SBUS_COTZ_RANGE[2] = {-0.1, -0.25};  // [m]
 static constexpr double OPTI_X_OFFSET  = 0.000; // [m]
 static constexpr double OPTI_Y_OFFSET  = 0.645; // [m]
 
+// ===== Butterworth cutoff frequencys =====
+static constexpr double GYRO_Z_CUTOFF_HZ   = 5.0;
+static constexpr double OPTI_VEL_CUTOFF_HZ = 4.0;
+
 // ===== Control Frequencies =====
 static constexpr std::chrono::steady_clock::duration CTRL_DT       = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(2700));
 static constexpr std::chrono::steady_clock::duration MAX_PULL_TICK = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(800));
