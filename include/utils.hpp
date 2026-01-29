@@ -40,44 +40,7 @@ struct Command {
   Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.15);   // desired CoT position [m], z-element can be manually changable by SBUS
 };
 
-
-struct Diff {
-  double last_x_{0.0};
-  bool has_last_{false};
-
-  std::chrono::steady_clock::time_point last_time_;
-  bool has_last_time_{false};
-
-  double dt_min_ = 1.0 / 10000.0;
-
-  inline void reset() {
-    has_last_ = false;
-    has_last_time_ = false;
-    last_x_ = 0.0;
-  }
-
-  inline double update(const double x, const std::chrono::steady_clock::time_point& now) {
-    double dt = 1e12;
-    if (has_last_time_) { dt = std::chrono::duration<double>(now - last_time_).count(); }
-    last_time_ = now;
-    has_last_time_ = true;
-
-    dt = std::max(dt, dt_min_);
-
-    if (!has_last_) {
-      last_x_ = x;
-      has_last_ = true;
-      return 0.0;
-    }
-
-    const double dx = (x - last_x_) / dt;
-    last_x_ = x;
-    return dx;
-  }
-};
-
-
-struct Butterworth2nd {
+struct Butter {
   // 2nd-order Butterworth states
   double bf_x1_{0.0};
   double bf_x2_{0.0};
@@ -90,7 +53,7 @@ struct Butterworth2nd {
   std::chrono::steady_clock::time_point last_time_;
   bool has_last_time_{false};
 
-  explicit Butterworth2nd(const double cutoff_hz)
+  explicit Butter(const double cutoff_hz)
   {
     wc_ = 2.0 * M_PI * cutoff_hz;
     wc2_ = wc_ * wc_;
@@ -215,6 +178,20 @@ static inline Eigen::Matrix3d expm_hat(const Eigen::Vector3d& w) {
   const Eigen::Matrix3d K = hat(w);
   const Eigen::Matrix3d I = Eigen::Matrix3d::Identity();
   return I + A * K + B * (K * K);
+}
+
+static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Vector3d& x_prev, const uint64_t& t_cur_ns, const uint64_t& t_prev_ns) {
+  constexpr uint64_t MinDtNs_ = 2500000ULL;   // Maximum 400 Hz
+  constexpr uint64_t MaxDtNs_ = 20000000ULL;  // Minimum 50 Hz
+
+  if (t_cur_ns <= t_prev_ns) return Eigen::Vector3d::Zero();
+
+  uint64_t dt_ns = t_cur_ns - t_prev_ns;
+  dt_ns = std::max(dt_ns, MinDtNs_);
+  if (dt_ns > MaxDtNs_) {return Eigen::Vector3d::Zero();}
+  
+  const double inv_dt = 1.0 / (static_cast<double>(dt_ns) * 1e-9);
+  return (x_cur - x_prev) * inv_dt;
 }
 
 // --------- [ Kinematics ] ---------

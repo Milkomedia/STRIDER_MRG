@@ -87,7 +87,6 @@ int main() {
   std::thread th_t265(&T265::run, &t265);
   uint64_t last_t265_cnt = 0;
   T265frame t265_frame{};
-  Butterworth2nd gyro_z_bf(param::GYRO_Z_CUTOFF_HZ);
 
   // -------------- [ 3. Opti thread ] ----------------
   Opti opti;
@@ -95,13 +94,6 @@ int main() {
   std::thread th_opti(&Opti::run, &opti);
   uint64_t last_opti_cnt = 0;
   OptiFrame opti_frame{};
-  Diff opti_vel[3];
-  Diff opti_acc[3];
-  Butterworth2nd opti_vel_bf[3] = {
-    Butterworth2nd(param::OPTI_VEL_CUTOFF_HZ),
-    Butterworth2nd(param::OPTI_VEL_CUTOFF_HZ),
-    Butterworth2nd(param::OPTI_VEL_CUTOFF_HZ)
-  };
 
   // -------------- [ 4. SBUS thread ] ----------------
   SBUS sbus;
@@ -127,6 +119,10 @@ int main() {
   fdcl::state_t*   gac_state_ptr = &gac_state;
   fdcl::command_t* gac_cmd_ptr   = &gac_cmd;
   fdcl::control gac(gac_state_ptr, gac_cmd_ptr);
+
+  // --- sensor measurement filters ---
+  Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
+  Butter gyro_z_bf(param::GYRO_Z_CUTOFF_HZ);
 
   // --- other parameters ---
   Phase   phase = Phase::READY;
@@ -176,13 +172,6 @@ int main() {
     // measure loop-start tick
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    auto last_imu_print  = std::chrono::steady_clock::now();
-    auto last_imu_update = std::chrono::steady_clock::now();
-    uint64_t imu_ok = 0, imu_fail = 0, imu_stall = 0;
-
-    // const Eigen::Matrix3d R_offset = rpy_to_R(0.0, -M_PI/2, 0.0);
-    // const Eigen::Vector3d p_offset(-0.06375, -0.03545, -0.03375);
-
     // IMU read [4117ns]
     const uint64_t cur_t265_cnt = t265.get_frame_count();
     if (cur_t265_cnt > last_t265_cnt) {
@@ -198,13 +187,17 @@ int main() {
     // MOCAP read [635ns]
     const uint64_t cur_opti_cnt = opti.get_frame_count();
     if (cur_opti_cnt > last_opti_cnt) {
+      const uint64_t prev_time_ns = opti_frame.host_time_ns;
+      const Eigen::Vector3d prev_pos = s.pos;
+      const Eigen::Vector3d prev_vel = s.vel;
       if (opti.read_latest(opti_frame)) {
         s.pos(0)=opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2)=-opti_frame.pos[2];
-        for (int i = 0; i < 3; ++i) {
-          const double vel_raw = opti_vel[i].update(s.pos(i), now);
-          s.vel(i) = opti_vel_bf[i].update(vel_raw, now);
-          s.acc(i) = opti_acc[i].update(s.vel(i), now);
-        }
+        
+        const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
+        
+        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(0) = opti_vel_bf[2].update(vel_raw(2), now);
+        s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
+
         last_opti_cnt = cur_opti_cnt;
       }
     }
@@ -417,7 +410,7 @@ int main() {
     else {teensy.write_zeros();}
 
     // --- Dynamixel write [355ns] ---
-    // if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
+    if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
     // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
     {
