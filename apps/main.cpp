@@ -85,8 +85,7 @@ int main() {
   T265 t265;
   t265.set_kill_callback(&KILL);
   std::thread th_t265(&T265::run, &t265);
-  uint64_t last_t265_cnt_read = 0;
-  uint64_t last_t265_cnt_wait = 0;
+  uint64_t last_t265_cnt = 0;
   T265frame t265_frame{};
 
   // -------------- [ 3. Opti thread ] ----------------
@@ -175,13 +174,13 @@ int main() {
 
     // IMU read [4117ns]
     const uint64_t cur_t265_cnt = t265.get_frame_count();
-    if (cur_t265_cnt > last_t265_cnt_read) {
+    if (cur_t265_cnt > last_t265_cnt) {
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
         s.omega(0)=t265_frame.omega[0]; 
         s.omega(1)=t265_frame.omega[1]; 
         s.omega(2)=gyro_z_bf.update(t265_frame.omega[2], now);
-        last_t265_cnt_read = cur_t265_cnt;
+        last_t265_cnt = cur_t265_cnt;
       }
     }
 
@@ -483,7 +482,7 @@ int main() {
     const std::chrono::steady_clock::time_point done_tick = std::chrono::steady_clock::now();
     
     if (done_tick < next_control_tick) {
-      if(t265.wait_new_frame_until(next_control_tick, last_t265_cnt_wait)){
+      if(t265.wait_new_frame_until(next_control_tick, last_t265_cnt)){
         std::chrono::steady_clock::duration pull_tick = next_control_tick - std::chrono::steady_clock::now();
         pull_tick = std::clamp(pull_tick, std::chrono::steady_clock::duration::zero(), param::MAX_PULL_TICK);
         next_control_tick -= pull_tick;

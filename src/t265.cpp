@@ -132,7 +132,7 @@ void T265::on_frame_(const rs2::frame& f) noexcept {
   }
 }
 
-bool T265::wait_new_frame_until(std::chrono::steady_clock::time_point deadline, uint64_t& last_frame_count) const {
+bool T265::wait_new_frame_until(std::chrono::steady_clock::time_point deadline, const uint64_t& last_frame_count) const {
   std::unique_lock<std::mutex> lk(frame_mtx_);
 
   const bool ok = frame_cv_.wait_until(lk, deadline, [&] {return stop_request_.load(std::memory_order_relaxed) || frame_count_.load(std::memory_order_acquire) != last_frame_count;});
@@ -140,7 +140,6 @@ bool T265::wait_new_frame_until(std::chrono::steady_clock::time_point deadline, 
   if (!ok) return false;
   if (stop_request_.load(std::memory_order_relaxed)) return false;
 
-  last_frame_count = frame_count_.load(std::memory_order_acquire);
   return true;
 }
 

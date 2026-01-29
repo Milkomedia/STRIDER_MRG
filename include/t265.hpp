@@ -38,7 +38,7 @@ public:
 
   bool read_latest(T265frame& out) const; // Lock-free read
 
-  bool wait_new_frame_until(std::chrono::steady_clock::time_point deadline, uint64_t& last_frame_count) const;
+  bool wait_new_frame_until(std::chrono::steady_clock::time_point deadline, const uint64_t& last_frame_count) const;
 
   uint64_t get_frame_count() const { return frame_count_.load(std::memory_order_relaxed); }
   bool is_running() const { return is_running_.load(std::memory_order_relaxed); }
