@@ -2,6 +2,7 @@
 
 # build artifacts
 build/
+SDK/
 
 # python
 __pycache__/

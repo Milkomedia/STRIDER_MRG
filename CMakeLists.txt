@@ -33,6 +33,7 @@ option(STRIDER_ENABLE_DXL      "Enable Dynamixel SDK integration" ON)
 # =============================================================================
 set(STRIDER_PY_DIR "${CMAKE_SOURCE_DIR}" CACHE PATH "Python root dir (contains acados/)")
 set(STRIDER_ACADOS_GEN_DIR "${CMAKE_SOURCE_DIR}/acados" CACHE PATH "acados dir (runtime lib path)")
+set(STRIDER_SDK_DIR "${CMAKE_SOURCE_DIR}/SDK" CACHE PATH "Local SDK root")
 
 # =============================================================================
 # Dependencies (base)
@@ -40,8 +41,23 @@ set(STRIDER_ACADOS_GEN_DIR "${CMAKE_SOURCE_DIR}/acados" CACHE PATH "acados dir (
 find_package(Threads REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(REALSENSE2 REQUIRED IMPORTED_TARGET realsense2)
+# =============================================================================
+# RealSense2 (LOCAL SDK, absolute link to avoid -lrealsense2 issues)
+# =============================================================================
+set(REALSENSE2_PREFIX "${STRIDER_SDK_DIR}/realsense2" CACHE PATH "Local RealSense2 prefix")
+set(REALSENSE2_INC_DIR "${REALSENSE2_PREFIX}/include")
+set(REALSENSE2_LIB_DIR "${REALSENSE2_PREFIX}/lib")
+if(NOT IS_DIRECTORY "${REALSENSE2_LIB_DIR}")
+  set(REALSENSE2_LIB_DIR "${REALSENSE2_PREFIX}/lib64")
+endif()
+
+set(REALSENSE2_SO "${REALSENSE2_LIB_DIR}/librealsense2.so")
+if(NOT EXISTS "${REALSENSE2_INC_DIR}/librealsense2/rs.hpp")
+  message(FATAL_ERROR "RealSense headers not found: ${REALSENSE2_INC_DIR}/librealsense2/rs.hpp")
+endif()
+if(NOT EXISTS "${REALSENSE2_SO}")
+  message(FATAL_ERROR "RealSense shared lib not found: ${REALSENSE2_SO}")
+endif()
 
 # =============================================================================
 # Python / pybind11
@@ -71,78 +87,60 @@ if(STRIDER_ENABLE_MPC_PY)
 endif()
 
 # =============================================================================
-# Dynamixel SDK
+# Dynamixel SDK (source-tree paths + built .so)
 # =============================================================================
 if(STRIDER_ENABLE_DXL)
-  set(DEPS_DXL_ROOT "$ENV{HOME}/Pre_build/dynamixel_sdk" CACHE PATH "dynamixel_sdk prebuild root")
+  set(DXL_SRC_ROOT "${STRIDER_SDK_DIR}/DynamixelSDK_src/c++" CACHE PATH "DynamixelSDK C++ source root")
+  set(DXL_INC_DIR  "${DXL_SRC_ROOT}/include")
+  set(DXL_LIB_DIR  "${DXL_SRC_ROOT}/build/linux64")
+  set(DXL_HEADER   "${DXL_INC_DIR}/dynamixel_sdk/dynamixel_sdk.h")
+  set(DXL_SO       "${DXL_LIB_DIR}/libdxl_x64_cpp.so")
 
-  set(DXL_INSTALL_DIR "${DEPS_DXL_ROOT}/install/dynamixel_sdk")
-  set(DXL_INC_DIR     "${DXL_INSTALL_DIR}/include")
-  set(DXL_LIB_DIR     "${DXL_INSTALL_DIR}/lib")
-  set(DXL_SO          "${DXL_LIB_DIR}/libdynamixel_sdk.so")
-
-  if(NOT EXISTS "${DXL_INC_DIR}/dynamixel_sdk/dynamixel_sdk.h")
-    message(FATAL_ERROR "dynamixel_sdk.h not found: ${DXL_INC_DIR}/dynamixel_sdk/dynamixel_sdk.h")
+  if(NOT EXISTS "${DXL_HEADER}")
+    message(FATAL_ERROR "dynamixel_sdk.h not found: ${DXL_HEADER}")
   endif()
-
   if(NOT EXISTS "${DXL_SO}")
-    message(FATAL_ERROR "libdynamixel_sdk.so not found: ${DXL_SO}")
+    message(FATAL_ERROR "libdxl_x64_cpp.so not found: ${DXL_SO} (build it: make -C ${DXL_LIB_DIR})")
   endif()
 
   add_library(dxl_deps INTERFACE)
-
-  target_include_directories(dxl_deps INTERFACE
-    "${DXL_INC_DIR}"
-  )
-
-  # Link with absolute .so (no ament/colcon env required)
-  target_link_libraries(dxl_deps INTERFACE
-    "${DXL_SO}"
-  )
-
-  # Ensure runtime can find libdynamixel_sdk.so without exporting LD_LIBRARY_PATH.
-  target_link_options(dxl_deps INTERFACE
-    "-Wl,-rpath,${DXL_LIB_DIR}"
-  )
+  target_include_directories(dxl_deps INTERFACE "${DXL_INC_DIR}")
+  target_link_libraries(dxl_deps INTERFACE "${DXL_SO}")
+  target_link_options(dxl_deps INTERFACE "-Wl,-rpath,${DXL_LIB_DIR}")
 endif()
 
 # =============================================================================
-# OptiTrack / libmotioncapture
+# OptiTrack / libmotioncapture (motion_capture_tracking source-tree)
+#   NOTE: build libmotioncapture with closed_source/vrpn/vicon/qualisys OFF
 # =============================================================================
 if(STRIDER_ENABLE_OPTI)
-  set(DEPS_OPTI_ROOT "$ENV{HOME}/Pre_build/deps_opti" CACHE PATH "deps_opti root")
+  set(STRIDER_SDK_DIR "${CMAKE_SOURCE_DIR}/SDK" CACHE PATH "Local SDK root")
+  set(OPTI_SDK_DIR "${STRIDER_SDK_DIR}/optiSDK" CACHE PATH "Opti SDK root")
 
-  set(LIBMOCAP_INC   "${DEPS_OPTI_ROOT}/libmotioncapture/include")
-  set(LIBMOCAP_BUILD "${DEPS_OPTI_ROOT}/build/libmotioncapture")
+  # motion_capture_tracking root (you cloned here)
+  set(MCT_ROOT "${OPTI_SDK_DIR}/motion_capture_tracking")
 
-  set(LIBMOCAP_A "${LIBMOCAP_BUILD}/liblibmotioncapture.a")
-  set(VICON_A    "${LIBMOCAP_BUILD}/deps/vicon-datastream-sdk/libViconDataStreamSDK_CPP.a")
-  set(QUALISYS_A "${LIBMOCAP_BUILD}/deps/qualisys_cpp_sdk/libqualisys_cpp_sdk.a")
+  # libmotioncapture source root inside the repo
+  set(LIBMOCAP_ROOT  "${MCT_ROOT}/deps/libmotioncapture")
+  set(LIBMOCAP_INC   "${LIBMOCAP_ROOT}/include")
+  set(LIBMOCAP_BUILD "${LIBMOCAP_ROOT}/build")
 
-  set(NATNET_LIBDIR "${DEPS_OPTI_ROOT}/libmotioncapture/deps/NatNetSDKCrossplatform/lib/ubuntu")
-
-  set(BOOST_SYSTEM_SO "/usr/lib/x86_64-linux-gnu/libboost_system.so.1.74.0")
-  set(BOOST_THREAD_SO "/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.74.0")
-  set(BOOST_ATOMIC_SO "/usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.74.0")
-
+  # Header check
   if(NOT EXISTS "${LIBMOCAP_INC}/libmotioncapture/motioncapture.h")
     message(FATAL_ERROR "motioncapture.h not found: ${LIBMOCAP_INC}/libmotioncapture/motioncapture.h")
   endif()
 
-  foreach(p IN ITEMS "${LIBMOCAP_A}" "${VICON_A}" "${QUALISYS_A}")
-    if(NOT EXISTS "${p}")
-      message(FATAL_ERROR "Required Opti library not found: ${p}")
-    endif()
-  endforeach()
-
-  foreach(p IN ITEMS "${BOOST_SYSTEM_SO}" "${BOOST_THREAD_SO}" "${BOOST_ATOMIC_SO}")
-    if(NOT EXISTS "${p}")
-      message(FATAL_ERROR "Boost .so not found: ${p}")
-    endif()
-  endforeach()
-
-  if(NOT IS_DIRECTORY "${NATNET_LIBDIR}")
-    message(FATAL_ERROR "NatNet lib dir not found: ${NATNET_LIBDIR}")
+  # Find built library (your output is typically liblibmotioncapture.a)
+  find_library(LIBMOCAP_LIB
+    NAMES motioncapture libmotioncapture liblibmotioncapture
+    PATHS "${LIBMOCAP_BUILD}"
+    NO_DEFAULT_PATH
+  )
+  if(NOT LIBMOCAP_LIB)
+    message(FATAL_ERROR
+      "libmotioncapture not found under: ${LIBMOCAP_BUILD}\n"
+      "Expected liblibmotioncapture.a (or .so)."
+    )
   endif()
 
   add_library(opti_deps INTERFACE)
@@ -151,28 +149,21 @@ if(STRIDER_ENABLE_OPTI)
     "${LIBMOCAP_INC}"
   )
 
-  target_link_directories(opti_deps INTERFACE
-    "${NATNET_LIBDIR}"
-  )
-
-  # Ensure runtime can find NatNet shared libs without exporting LD_LIBRARY_PATH.
-  target_link_options(opti_deps INTERFACE
-    "-Wl,-rpath,${NATNET_LIBDIR}"
-  )
-
+  # Minimal link: assumes you built libmotioncapture with
+  # OPTITRACK=ON, OPTITRACK_CLOSED_SOURCE=OFF, VRPN/VICON/QUALISYS=OFF
   target_link_libraries(opti_deps INTERFACE
-    "${LIBMOCAP_A}"
-    "${VICON_A}"
-    "${QUALISYS_A}"
-
-    "${BOOST_SYSTEM_SO}"
-    "${BOOST_THREAD_SO}"
-    "${BOOST_ATOMIC_SO}"
-
-    NatNet
+    "${LIBMOCAP_LIB}"
     dl
   )
+
+  # rpath is harmless for static, helpful if you ever build shared
+  target_link_options(opti_deps INTERFACE
+    "-Wl,-rpath,${LIBMOCAP_BUILD}"
+  )
+
+  unset(LIBMOCAP_LIB)
 endif()
+
 
 # =============================================================================
 # geometry_ctrl
@@ -196,49 +187,45 @@ target_link_libraries(geometry_ctrl PUBLIC
 # =============================================================================
 add_library(strider_core STATIC)
 
+# core sources (gate by options)
 target_sources(strider_core PRIVATE
-  src/dynamixel.cpp
   src/mmap_logger.cpp
-  src/mpc_wrapper.cpp
-  src/opti.cpp
   src/sbus.cpp
   src/t265.cpp
   src/teensy.cpp
 )
 
 if(STRIDER_ENABLE_DXL)
-  target_sources(strider_core PRIVATE
-    src/dynamixel.cpp
-  )
+  target_sources(strider_core PRIVATE src/dynamixel.cpp)
 endif()
 
 if(STRIDER_ENABLE_MPC_PY)
-  target_sources(strider_core PRIVATE
-    src/mpc_wrapper.cpp
-  )
+  target_sources(strider_core PRIVATE src/mpc_wrapper.cpp)
 endif()
 
 if(STRIDER_ENABLE_OPTI)
-  target_sources(strider_core PRIVATE
-    src/opti.cpp
-  )
+  target_sources(strider_core PRIVATE src/opti.cpp)
 endif()
 
 target_include_directories(strider_core PUBLIC
   "${CMAKE_SOURCE_DIR}/include"
+  "${REALSENSE2_INC_DIR}"
 )
 
 target_link_libraries(strider_core PUBLIC
   Threads::Threads
   Eigen3::Eigen
   dl
-  PkgConfig::REALSENSE2
+  "${REALSENSE2_SO}"
+)
+
+# Runtime rpath for RealSense2
+target_link_options(strider_core PUBLIC
+  "-Wl,-rpath,${REALSENSE2_LIB_DIR}"
 )
 
 if(STRIDER_ENABLE_DXL)
-  target_link_libraries(strider_core PUBLIC
-    dxl_deps
-  )
+  target_link_libraries(strider_core PUBLIC dxl_deps)
 endif()
 
 if(STRIDER_ENABLE_MPC_PY)
@@ -249,9 +236,7 @@ if(STRIDER_ENABLE_MPC_PY)
 endif()
 
 if(STRIDER_ENABLE_OPTI)
-  target_link_libraries(strider_core PUBLIC
-    opti_deps
-  )
+  target_link_libraries(strider_core PUBLIC opti_deps)
 endif()
 
 # =============================================================================
@@ -268,14 +253,18 @@ if(STRIDER_BUILD_APP)
   # -------------------------
   # RPATH: keep binary self-contained as much as possible
   # -------------------------
-  set(STRIDER_RPATH_LIST "$ORIGIN" "${STRIDER_ACADOS_GEN_DIR}")
+  set(STRIDER_RPATH_LIST "$ORIGIN" "${STRIDER_ACADOS_GEN_DIR}" "${REALSENSE2_LIB_DIR}")
 
   if(STRIDER_ENABLE_MPC_PY AND DEFINED ENV{CONDA_PREFIX})
     list(APPEND STRIDER_RPATH_LIST "$ENV{CONDA_PREFIX}/lib")
   endif()
 
   if(STRIDER_ENABLE_OPTI)
-    list(APPEND STRIDER_RPATH_LIST "${NATNET_LIBDIR}")
+    # only needed if you end up using shared libs there (harmless otherwise)
+    list(APPEND STRIDER_RPATH_LIST "${LIBMOCAP_BUILD}")
+    if(IS_DIRECTORY "${NATNET_LIBDIR}")
+      list(APPEND STRIDER_RPATH_LIST "${NATNET_LIBDIR}")
+    endif()
   endif()
 
   if(STRIDER_ENABLE_DXL)
@@ -292,14 +281,17 @@ if(STRIDER_BUILD_APP)
   # -------------------------
   # Convenience run target
   # -------------------------
-  set(STRIDER_LD_PATH_LIST "${STRIDER_ACADOS_GEN_DIR}")
+  set(STRIDER_LD_PATH_LIST "${STRIDER_ACADOS_GEN_DIR}" "${REALSENSE2_LIB_DIR}")
 
   if(STRIDER_ENABLE_MPC_PY AND DEFINED ENV{CONDA_PREFIX})
     list(APPEND STRIDER_LD_PATH_LIST "$ENV{CONDA_PREFIX}/lib")
   endif()
 
   if(STRIDER_ENABLE_OPTI)
-    list(APPEND STRIDER_LD_PATH_LIST "${NATNET_LIBDIR}")
+    list(APPEND STRIDER_LD_PATH_LIST "${LIBMOCAP_BUILD}")
+    if(IS_DIRECTORY "${NATNET_LIBDIR}")
+      list(APPEND STRIDER_LD_PATH_LIST "${NATNET_LIBDIR}")
+    endif()
   endif()
 
   if(STRIDER_ENABLE_DXL)
