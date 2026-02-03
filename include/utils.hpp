@@ -320,7 +320,8 @@ static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, doubl
     return T;
   }
 
-static inline Eigen::Vector3d FK(const double q[20]) {
+
+  static inline Eigen::Vector3d FK(const double q[20]) {
   // returns {b}->{cot} position and z-directional heading vector
   Eigen::Vector3d bpcot = Eigen::Vector3d::Zero();
   for (uint8_t i = 0; i < 4; ++i) {

@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <pybind11/embed.h>
+#include <cstdio>
 
 static std::atomic<bool> g_killed{false};
 static void sigint_handler(int) {g_killed.store(true);}
@@ -163,6 +164,10 @@ int main() {
   mmap_logger::MMapLogger logger("/tmp/strider_log.mmap", /*reset=*/true);
   const std::chrono::steady_clock::time_point initial_time = std::chrono::steady_clock::now();
   logger.open();
+
+  std::string path = std::string("/home/strider/Desktop/STRIDER_MRG/apps/bag_bin/") + param::Log_File_NAME;
+  mmap_logger::log_fp = std::fopen(path.c_str(), "wb");
+  setvbuf(mmap_logger::log_fp, nullptr, _IOFBF, 1<<20); 
   
   // --- time scope definition ---
   std::chrono::steady_clock::time_point next_control_tick = std::chrono::steady_clock::now();
@@ -195,7 +200,7 @@ int main() {
         
         const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
         
-        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(0) = opti_vel_bf[2].update(vel_raw(2), now);
+        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), now);
         s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
 
         last_opti_cnt = cur_opti_cnt;
@@ -426,9 +431,17 @@ int main() {
       ld.pos[1] = static_cast<float>(s.pos(1));
       ld.pos[2] = static_cast<float>(s.pos(2));
 
+      ld.vel[0] = static_cast<float>(s.vel(0));
+      ld.vel[1] = static_cast<float>(s.vel(1));
+      ld.vel[2] = static_cast<float>(s.vel(2));
+
       ld.rpy[0] = static_cast<float>(euler_rpy(0));
       ld.rpy[1] = static_cast<float>(euler_rpy(1));
       ld.rpy[2] = static_cast<float>(euler_rpy(2));
+
+      ld.omega[0] = static_cast<float>(s.omega(0));
+      ld.omega[1] = static_cast<float>(s.omega(1));
+      ld.omega[2] = static_cast<float>(s.omega(2));
 
       {
         const Eigen::Vector3d rpy_raw = R_to_rpy(R_raw);
@@ -474,6 +487,9 @@ int main() {
       ld.solve_status = l_mpc_output.state;
 
       logger.push(ld);
+      if (mmap_logger::log_fp) {
+        std::fwrite(&ld, sizeof(ld), 1, mmap_logger::log_fp);
+      }
     }
 
     // [1815030ns]
@@ -497,6 +513,11 @@ int main() {
   opti.request_stop();
   sbus.request_stop();
   dxl.request_stop();
+
+  if (mmap_logger::log_fp) {
+  fclose(mmap_logger::log_fp);
+  mmap_logger::log_fp = nullptr;
+  }
 
   if (th_t265.joinable()) th_t265.join();
   if (th_opti.joinable()) th_opti.join();

@@ -22,7 +22,9 @@ struct LogData {
   float t              =  0.0f;  // timestamp [sec]
   float pos_d[3]       = {0.0f}; // desired position [m]
   float pos[3]         = {0.0f}; // current position [m]
+  float vel[3]         = {0.0f}; // opti velocity [m/s]
   float rpy[3]         = {0.0f}; // current attitude [rad]
+  float omega[3]       = {0.0f}; // imu angular rate [rad/s]
   float rpy_raw[3]     = {0.0f}; // desired attitude from position ctrl [rad]
   float rpy_d[3]       = {0.0f}; // desired attitude reconstructed (R_d) [rad]
   float tau_d[3]       = {0.0f}; // desired torque (att ctrl) [N.m]
@@ -38,8 +40,11 @@ struct LogData {
 };
 #pragma pack(pop)
 
+// .bin File 
+static FILE* log_fp = nullptr;
+
 // 152 bytes with the layout above
-static_assert(sizeof(LogData) == 152, "LogData size changed. Update Python reader offsets.");
+static_assert(sizeof(LogData) == 176, "LogData size changed. Update Python reader offsets.");
 
 // -----------------------------
 // MMap header + ring buffer slot
@@ -67,7 +72,7 @@ struct alignas(8) Slot {
 };
 
 static_assert(alignof(Slot) == 8, "Slot alignment must be 8.");
-static_assert(sizeof(Slot) == 160, "Slot size must be 160 bytes.");
+static_assert(sizeof(Slot) == 184, "Slot size must be 184 bytes.");
 
 static constexpr uint32_t k_Sec = 10;
 static constexpr uint32_t k_Cap = static_cast<uint32_t>(1.0 / std::chrono::duration<double>(param::CTRL_DT).count()) * k_Sec;
