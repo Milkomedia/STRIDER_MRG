@@ -116,15 +116,27 @@ static inline Eigen::Matrix3d quat_to_R(const double& x, const double& y, const 
   const double wx = w*x, wy = w*y, wz = w*z;
 
   Eigen::Matrix3d R;
-  R(0,0) = 1.0 - 2.0 * (yy + zz);
-  R(0,1) = 2.0 * (xy - wz);
-  R(0,2) = 2.0 * (xz + wy);
-  R(1,0) = 2.0 * (xy + wz);
-  R(1,1) = 1.0 - 2.0 * (xx + zz);
-  R(1,2) = 2.0 * (yz - wx);
-  R(2,0) = 2.0 * (xz - wy);
-  R(2,1) = 2.0 * (yz + wx);
-  R(2,2) = 1.0 - 2.0 * (xx + yy);
+  // R(0,0) = 1.0 - 2.0 * (yy + zz);
+  // R(0,1) = 2.0 * (xy - wz);
+  // R(0,2) = 2.0 * (xz + wy);
+  // R(1,0) = 2.0 * (xy + wz);
+  // R(1,1) = 1.0 - 2.0 * (xx + zz);
+  // R(1,2) = 2.0 * (yz - wx);
+  // R(2,0) = 2.0 * (xz - wy);
+  // R(2,1) = 2.0 * (yz + wx);
+  // R(2,2) = 1.0 - 2.0 * (xx + yy);  
+
+  // Rz(90) * Rx(-90) * R_raw * Rz(90) * Rx(180)
+  R(0,0) = - (2.0 * (yz + wx));
+  R(0,1) = - (2.0 * (xz - wy));
+  R(0,2) = 1.0 - 2.0 * (xx + yy);
+  R(1,0) = 2.0 * (xy - wz);
+  R(1,1) = 1.0 - 2.0 * (yy + zz);
+  R(1,2) = - (2.0 * (xz + wy));
+  R(2,0) = - (1.0 - 2.0 * (xx + zz));
+  R(2,1) = - (2.0 * (xy + wz));
+  R(2,2) = 2.0 * (yz - wx);
+  
   return R;
 }
 
