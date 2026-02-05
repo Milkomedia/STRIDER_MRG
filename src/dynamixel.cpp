@@ -213,8 +213,11 @@ void Dynamixel::run() {
   try {
     // Retry init
     bool ok = false;
-    if (open_and_init_()) {ok = true;}
-    else {close_();}
+    for (uint8_t attempt = 0; attempt < 10; ++attempt) {
+      if (open_and_init_()) {ok = true; break;}
+      close_();
+      if (attempt < 9) {std::this_thread::sleep_for(std::chrono::milliseconds(500));}
+    }
 
     if (!ok) { // Startup fatal: no freeze possible, kill.
       call_kill_("[DXL] open/init failed");
