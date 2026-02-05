@@ -43,7 +43,7 @@ struct LogData {
 // .bin File 
 static FILE* log_fp = nullptr;
 
-// 152 bytes with the layout above
+// 176 bytes with the layout above
 static_assert(sizeof(LogData) == 176, "LogData size changed. Update Python reader offsets.");
 
 // -----------------------------
@@ -65,7 +65,7 @@ struct MMapHeader {
 
 static_assert(sizeof(MMapHeader) == 64, "MMapHeader must be 64 bytes.");
 
-// Slot = seq(8) + LogData(152) = 160 (already multiple of 8)
+// Slot = seq(8) + LogData(176) = 184
 struct alignas(8) Slot {
   uint64_t seq;  // seqlock counter (odd=writing, even=stable)
   LogData  data; // payload

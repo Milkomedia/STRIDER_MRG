@@ -22,7 +22,7 @@ static void sigint_handler(int) {g_killed.store(true);}
 // Kill must be idempotent (Called from callback thread).
 static void KILL(const char* msg) {
   if (g_killed.exchange(true, std::memory_order_relaxed)) return;
-  std::fprintf(stderr, "\n\n [!KILL] -> %s\n\n", (msg ? msg : "(null)"));
+  std::fprintf(stderr, "\n\n [KILL!] -> %s\n\n", (msg ? msg : "(null)"));
   g_killed.store(true, std::memory_order_relaxed);
 }
 
@@ -123,6 +123,7 @@ int main() {
 
   // --- sensor measurement filters ---
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
+  Butter gyro_xy_bf(param::GYRO_XY_CUTOFF_HZ);
   Butter gyro_z_bf(param::GYRO_Z_CUTOFF_HZ);
 
   // --- other parameters ---
@@ -182,9 +183,12 @@ int main() {
     if (cur_t265_cnt > last_t265_cnt) {
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
-        s.omega(0)=t265_frame.omega[0]; 
-        s.omega(1)=t265_frame.omega[1]; 
-        s.omega(2)=gyro_z_bf.update(t265_frame.omega[2], now);
+        Eigen::Vector3d w = omega_align(Eigen::Vector3d(t265_frame.omega[0], t265_frame.omega[1], t265_frame.omega[2]));
+
+        s.omega(0) = gyro_xy_bf.update(w(0), now);
+        s.omega(1) = gyro_xy_bf.update(w(1), now);
+        s.omega(2) = gyro_z_bf.update(w(2), now);
+
         last_t265_cnt = cur_t265_cnt;
       }
     }
@@ -415,11 +419,11 @@ int main() {
     else {teensy.write_zeros();}
 
     // --- Dynamixel write [355ns] ---
-    // if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
+    if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
     // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
     {
-      mmap_logger::LogData ld;
+      mmap_logger::LogData ld{};
 
       ld.t = std::chrono::duration<float>(now - initial_time).count();
 
@@ -430,6 +434,7 @@ int main() {
       ld.pos[0] = static_cast<float>(s.pos(0));
       ld.pos[1] = static_cast<float>(s.pos(1));
       ld.pos[2] = static_cast<float>(s.pos(2));
+
 
       ld.vel[0] = static_cast<float>(s.vel(0));
       ld.vel[1] = static_cast<float>(s.vel(1));

@@ -10,20 +10,20 @@ namespace param {
 
 // ===== Geometry control =====
 // --- pos&att ctrl gain
-static constexpr double kX[3] = {22.0, 22.0, 17.0}; // Position gain [x, y, z]
-static constexpr double kV[3] = { 8.0,  8.0,  7.0}; // Velocity gain [x, y, z]
-static constexpr double kR[3] = {10.0, 10.0,  3.0}; // Rotational gain [roll, pitch, yaw]
-static constexpr double kW[3] = { 3.5,  3.5,  1.5}; // angular Velocity gain [roll, pitch, yaw]
+static constexpr double kX[3] = {28.5, 28.5, 15.00}; // Position gain [x, y, z]
+static constexpr double kV[3] = {18.0, 18.0,  7.00}; // Velocity gain [x, y, z]
+static constexpr double kR[3] = {10.7, 10.7,  3.42}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kW[3] = { 4.5,  4.5,  2.95}; // angular Velocity gain [roll, pitch, yaw]
 
-static constexpr double kI  = 0.0;  // Attitude integral gain for roll and pitch
-static constexpr double kyI = 0.0;  // Attitude integral gain for yaw
-static constexpr double kIX = 23.0; // Position integral gains
+static constexpr double kI  = 0.80;  // Attitude integral gain for roll and pitch
+static constexpr double kyI = 1.00;  // Attitude integral gain for yaw
+static constexpr double kIX = 20.0; // Position integral gains
 
 // --- UAV Parameters ---
-static constexpr double J[9] = {0.3, 0.0, 0.0,
-                                0.0, 0.3, 0.0,
-                                0.0, 0.0, 0.5318};
-static constexpr double M  = 7.5;     // [kg]
+static constexpr double J[9] = {    0.3, -0.0006, -0.0006,
+                                -0.0006,     0.3,  0.0006,
+                                -0.0006,  0.0006,  0.5318};
+static constexpr double M  = 7.25;    // [kg]
 static constexpr double G  = 9.80665; // [m/s^2] (must be positive)
 
 // ===== Control Allocation =====
@@ -51,6 +51,7 @@ static constexpr double OPTI_X_OFFSET  = 0.000; // [m]
 static constexpr double OPTI_Y_OFFSET  = 0.645; // [m]
 
 // ===== Butterworth cutoff frequencys =====
+static constexpr double GYRO_XY_CUTOFF_HZ  = 10.0;
 static constexpr double GYRO_Z_CUTOFF_HZ   = 5.0;
 static constexpr double OPTI_VEL_CUTOFF_HZ = 4.0;
 
