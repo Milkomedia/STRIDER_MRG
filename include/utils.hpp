@@ -110,15 +110,16 @@ static inline Eigen::Vector3d quat_to_RPY(const Eigen::Quaterniond q) {
 }
 
 static inline Eigen::Matrix3d quat_to_R(const double& x, const double& y, const double& z, const double& w) {
-  // Quaternion to SO3 map
+  // Quaternion to SO3 map (t265 pose-frame -> z-down frame transformation)
   const double xx = x*x, yy = y*y, zz = z*z;
   const double xy = x*y, xz = x*z, yz = y*z;
   const double wx = w*x, wy = w*y, wz = w*z;
 
-  // Rz(90) * Rx(-90) * R_raw * Rz(90) * Rx(180)
-  // Rz(90) * Rx(180) -> i_R_b
-  // Rz(90) * Rx(-90) -> g_R_gp
+  // Rz(90) * Rx(180) = imu->body rotation (t265 pose to strider body)
+  // Rz(90) * Rx(-90) = z-down->pose(y-up) roation (strider ground to t265 ground)
+  // R = Rz(90) * Rx(-90) * R_raw * Rz(90) * Rx(180)
 
+  // pre-calculated rotation matrix
   Eigen::Matrix3d R;
   R(0,0) = - (2.0 * (yz + wx));
   R(0,1) = - (2.0 * (xz - wy));
@@ -127,20 +128,10 @@ static inline Eigen::Matrix3d quat_to_R(const double& x, const double& y, const 
   R(1,1) = 1.0 - 2.0 * (yy + zz);
   R(1,2) = - (2.0 * (xz + wy));
   R(2,0) = - (1.0 - 2.0 * (xx + zz));
-  R(2,1) = - (2.0 * (xy + wz)); 
+  R(2,1) = - (2.0 * (xy + wz));
   R(2,2) = 2.0 * (yz - wx);
   
   return R;
-}
-
-static inline Eigen::Vector3d omega_align(const Eigen::Vector3d& i_w) {
-  Eigen::Matrix3d Rot_omega;
-
-  Rot_omega << 0,   0,  -1,
-               1,   0,   0,
-               0,  -1,   0;
-
-  return Rot_omega * i_w;
 }
 
 static inline Eigen::Vector3d R_to_rpy(const Eigen::Matrix3d& R) {
@@ -199,7 +190,6 @@ static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Ve
   constexpr uint64_t MinDtNs_ = 2500000ULL;   // Maximum 400 Hz
   constexpr uint64_t MaxDtNs_ = 20000000ULL;  // Minimum 50 Hz
 
-  if (t_prev_ns == 0) return Eigen::Vector3d::Zero();
   if (t_cur_ns <= t_prev_ns) return Eigen::Vector3d::Zero();
 
   uint64_t dt_ns = t_cur_ns - t_prev_ns;
@@ -388,7 +378,7 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
   else {C1_des = (A1.transpose()*A1 + 1e-8*Eigen::Matrix4d::Identity()).ldlt().solve(A1.transpose()*B1);}
 
   // Thrust clamp (5%~98%)
-  for (int i = 0; i < 4; ++i) C1_des(i) = std::clamp(C1_des(i), param::PWM_A*0.05*0.05+param::PWM_B, param::PWM_A*0.98*0.98+param::PWM_B);
+  for (uint8_t i = 0; i < 4; ++i) {C1_des(i) = std::clamp(C1_des(i), 8.7, 53.3);}
 
   // tilt allocation
   Eigen::Matrix4d A2;

@@ -74,7 +74,11 @@ private:
   // Integral gains
   double kI = 0.0;  /**< Attitude integral gain for roll and pitch */
   double kyI = 0.0;  /**< Attitude integral gain for yaw */
-  double kIX = 0.0;  /**< Position integral gains */
+  Matrix3 kIX = Matrix3::Zero();  /**< Position integral gains */
+
+  double sat_sigma_x_ = 0.0;  /**< Position x integral saturation [N] */
+  double sat_sigma_y_ = 0.0;  /**< Position y integral saturation [N] */
+  double sat_sigma_z_ = 0.0;  /**< Position z integral saturation [N] */
 };
 
 }

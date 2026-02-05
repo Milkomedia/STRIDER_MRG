@@ -50,18 +50,13 @@ void fdcl::control::position_control(void){
 
   // position integral terms
   eIX.integrate(eX + eV, dt); // eq (13)
-  double sat_sigma = 20.0/kIX; // 20N saturation
-  double kIX_xy = 15.0; //<--gain tuning ------------------------------
-  double sat_sigma_horizontal = 15.0/kIX_xy; //<--gain tuning ------------------------------
-  eIX.error.x() = std::clamp(eIX.error.x(), -sat_sigma_horizontal, sat_sigma_horizontal);
-  eIX.error.y() = std::clamp(eIX.error.y(), -sat_sigma_horizontal, sat_sigma_horizontal);
-  eIX.error.z() = std::clamp(eIX.error.z(), -sat_sigma,            sat_sigma);
-
-  Eigen::Matrix3d KIX_dig = (Eigen::Vector3d(kIX_xy, kIX_xy, kIX)).asDiagonal();
+  eIX.error.x() = std::clamp(eIX.error.x(), -sat_sigma_x_, sat_sigma_x_);
+  eIX.error.y() = std::clamp(eIX.error.y(), -sat_sigma_y_, sat_sigma_y_);
+  eIX.error.z() = std::clamp(eIX.error.z(), -sat_sigma_z_, sat_sigma_z_);
   
   // force 'f' along negative b3-axis - eq (14)
   // this term equals to R.e3
-  Vector3 A = -kX*eX - kV*eV - KIX_dig*eIX.error - m*g*e3 + m*command->xd_2dot;
+  Vector3 A = -kX*eX - kV*eV - kIX*eIX.error - m*g*e3 + m*command->xd_2dot;
 
   Vector3 b3 = state->R * e3;
   Vector3 b3_dot = state->R * hat(state->W) * e3; // eq (22)
@@ -160,9 +155,16 @@ void fdcl::control::load_config(void){
   kW(1,1) = param::kW[1];
   kW(2,2) = param::kW[2];
 
-  kIX = param::kIX;
+  kIX.setZero();
+  kIX(0,0) = param::kIX[0];
+  kIX(1,1) = param::kIX[1];
+  kIX(2,2) = param::kIX[2];
   kI  = param::kI;
   kyI = param::kyI;
+
+  sat_sigma_x_ = param::kIX_SAT[0];
+  sat_sigma_y_ = param::kIX_SAT[1];
+  sat_sigma_z_ = param::kIX_SAT[2];
 
   this->m = param::M;
   this->g = param::G;

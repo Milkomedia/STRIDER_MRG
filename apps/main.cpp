@@ -125,8 +125,7 @@ int main() {
 
   // --- sensor measurement filters ---
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
-  Butter gyro_xy_bf(param::GYRO_XY_CUTOFF_HZ);
-  Butter gyro_z_bf(param::GYRO_Z_CUTOFF_HZ);
+  Butter gyro_bf[3] = {Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_Z_CUTOFF_HZ)};
 
   // --- other parameters ---
   Phase   phase = Phase::READY;
@@ -188,11 +187,9 @@ int main() {
     if (cur_t265_cnt > last_t265_cnt) {
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
-        Eigen::Vector3d w = omega_align(Eigen::Vector3d(t265_frame.omega[0], t265_frame.omega[1], t265_frame.omega[2]));
 
-        s.omega(0) = gyro_xy_bf.update(w(0), now);
-        s.omega(1) = gyro_xy_bf.update(w(1), now);
-        s.omega(2) = gyro_z_bf.update(w(2), now);
+        // gyro frame transformation ()
+        s.omega(0) = gyro_bf[0].update(-t265_frame.omega[2], now); s.omega(1) = gyro_bf[1].update(t265_frame.omega[0], now); s.omega(2) = gyro_bf[2].update(t265_frame.omega[1], now);
 
         last_t265_cnt = cur_t265_cnt;
       }
@@ -205,11 +202,12 @@ int main() {
       const Eigen::Vector3d prev_pos = s.pos;
       const Eigen::Vector3d prev_vel = s.vel;
       if (opti.read_latest(opti_frame)) {
+        // apply frame transformation (opti uses z-up convention)
         s.pos(0)=opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2)=-opti_frame.pos[2];
-        
+
         const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
-        
         s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), now);
+
         s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
 
         last_opti_cnt = cur_opti_cnt;
