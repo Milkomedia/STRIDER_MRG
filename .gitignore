@@ -14,3 +14,6 @@ generated/
 # macOS
 .DS_Store
 Icon?
+
+# logging File
+*.bin
