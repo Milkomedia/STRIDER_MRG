@@ -11,13 +11,9 @@ import pyqtgraph as pg
 pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
 
-
-# -----------------------------
-# Must match C++ mmap_manager.hpp
-# -----------------------------
 HEADER_SIZE = 64
-LOGDATA_SIZE = 152
-SLOT_SIZE = 160  # seq(u64)=8 + LogData(152)=160
+LOGDATA_SIZE = 176
+SLOT_SIZE = 184  # seq(u64)=8 + LogData(176)=184
 
 MAGIC = b"STRLOG2\x00"
 VERSION = 2
@@ -95,8 +91,10 @@ class MMapReader:
     t = np.empty((n,), dtype=np.float32)
     pos_d = np.empty((n, 3), dtype=np.float32)
     pos = np.empty((n, 3), dtype=np.float32)
+    vel = np.empty((n, 3), dtype=np.float32)
 
     rpy = np.empty((n, 3), dtype=np.float32)
+    omega = np.empty((n, 3), dtype=np.float32)
     rpy_raw = np.empty((n, 3), dtype=np.float32)
     rpy_d = np.empty((n, 3), dtype=np.float32)
 
@@ -114,23 +112,24 @@ class MMapReader:
     solve_ms = np.empty((n,), dtype=np.float32)
     solve_status = np.empty((n,), dtype=np.int32)
 
-    # Offsets in LogData (packed)
-    OFF_T = 0
-    OFF_POS_D = 4
-    OFF_POS = 16
-    OFF_RPY = 28
-    OFF_RPY_RAW = 40
-    OFF_RPY_D = 52
-    OFF_TAU_D = 64
-    OFF_TAU_OFF = 76
-    OFF_TAU_THRUST = 84
-    OFF_TILT = 92
-    OFF_F_THRUST = 108
-    OFF_F_TOTAL = 124
-    OFF_R_COT = 128
-    OFF_R_COT_CMD = 136
-    OFF_SOLVE_MS = 144
-    OFF_SOLVE_STATUS = 148
+    OFF_T            = 0
+    OFF_POS_D        = 4
+    OFF_POS          = 16
+    OFF_VEL          = 28
+    OFF_RPY          = 40
+    OFF_OMEGA        = 52
+    OFF_RPY_RAW      = 64
+    OFF_RPY_D        = 76
+    OFF_TAU_D        = 88
+    OFF_TAU_OFF      = 100
+    OFF_TAU_THRUST   = 108
+    OFF_TILT         = 116
+    OFF_F_THRUST     = 132
+    OFF_F_TOTAL      = 148
+    OFF_R_COT        = 152
+    OFF_R_COT_CMD    = 160
+    OFF_SOLVE_MS     = 168
+    OFF_SOLVE_STATUS = 172
 
     for i in range(n):
       logical = start + i
@@ -150,29 +149,33 @@ class MMapReader:
 
         t[i] = struct.unpack_from("<f", dbuf, OFF_T)[0]
         pos_d[i, :] = struct.unpack_from("<fff", dbuf, OFF_POS_D)
-        pos[i, :] = struct.unpack_from("<fff", dbuf, OFF_POS)
+        pos[i, :]   = struct.unpack_from("<fff", dbuf, OFF_POS)
 
-        rpy[i, :] = struct.unpack_from("<fff", dbuf, OFF_RPY)
+        vel[i, :]   = struct.unpack_from("<fff", dbuf, OFF_VEL)
+        rpy[i, :]   = struct.unpack_from("<fff", dbuf, OFF_RPY)
+        omega[i, :] = struct.unpack_from("<fff", dbuf, OFF_OMEGA)
+
         rpy_raw[i, :] = struct.unpack_from("<fff", dbuf, OFF_RPY_RAW)
-        rpy_d[i, :] = struct.unpack_from("<fff", dbuf, OFF_RPY_D)
+        rpy_d[i, :]   = struct.unpack_from("<fff", dbuf, OFF_RPY_D)
 
-        tau_d[i, :] = struct.unpack_from("<fff", dbuf, OFF_TAU_D)
-        tau_off[i, :] = struct.unpack_from("<ff", dbuf, OFF_TAU_OFF)
-        tau_thrust[i, :] = struct.unpack_from("<ff", dbuf, OFF_TAU_THRUST)
+        tau_d[i, :]      = struct.unpack_from("<fff", dbuf, OFF_TAU_D)
+        tau_off[i, :]    = struct.unpack_from("<ff",  dbuf, OFF_TAU_OFF)
+        tau_thrust[i, :] = struct.unpack_from("<ff",  dbuf, OFF_TAU_THRUST)
 
-        tilt[i, :] = struct.unpack_from("<ffff", dbuf, OFF_TILT)
+        tilt[i, :]     = struct.unpack_from("<ffff", dbuf, OFF_TILT)
         f_thrust[i, :] = struct.unpack_from("<ffff", dbuf, OFF_F_THRUST)
-        f_total[i] = struct.unpack_from("<f", dbuf, OFF_F_TOTAL)[0]
+        f_total[i]     = struct.unpack_from("<f",    dbuf, OFF_F_TOTAL)[0]
 
-        r_cot[i, :] = struct.unpack_from("<ff", dbuf, OFF_R_COT)
+        r_cot[i, :]     = struct.unpack_from("<ff", dbuf, OFF_R_COT)
         r_cot_cmd[i, :] = struct.unpack_from("<ff", dbuf, OFF_R_COT_CMD)
 
-        solve_ms[i] = struct.unpack_from("<f", dbuf, OFF_SOLVE_MS)[0]
+        solve_ms[i]     = struct.unpack_from("<f", dbuf, OFF_SOLVE_MS)[0]
         solve_status[i] = struct.unpack_from("<i", dbuf, OFF_SOLVE_STATUS)[0]
         break
 
     ch = {
       "pos_d": pos_d, "pos": pos,
+      "vel": vel, "omega": omega,
       "rpy": rpy, "rpy_raw": rpy_raw, "rpy_d": rpy_d,
       "tau_d": tau_d, "tau_off": tau_off, "tau_thrust": tau_thrust,
       "tilt": tilt, "f_thrust": f_thrust, "f_total": f_total,
@@ -183,9 +186,6 @@ class MMapReader:
     return t, ch
 
 
-# -----------------------------
-# UI helpers
-# -----------------------------
 def _deg(x: np.ndarray) -> np.ndarray:
   return x * (180.0 / np.pi)
 
@@ -220,20 +220,17 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self.update_ms = int(update_ms)
 
     self._curves: Dict[str, pg.PlotDataItem] = {}
-
-    # plot linking
     self._all_plots: List[pg.PlotItem] = []
     self._x_master: Optional[pg.PlotItem] = None
 
-    # status scatter + legend colors
     self._status_plot: Optional[pg.PlotItem] = None
-    self._status_scatter: Optional[pg.ScatterPlotItem] = None
+    self._status_bars: Dict[int, pg.BarGraphItem] = {}
     self._status_colors = {
-      0: (0, 200, 0, 220),     # green
-      1: (255, 230, 0, 220),   # yellow
-      2: (255, 140, 0, 220),   # orange
-      3: (255, 0, 0, 220),     # red
-      4: (160, 0, 255, 220),   # purple
+      0: (0, 200, 0, 220),
+      1: (255, 230, 0, 220),
+      2: (255, 140, 0, 220),
+      3: (255, 0, 0, 220),
+      4: (160, 0, 255, 220),
     }
     self._status_names = {
       0: "SUCCESS",
@@ -242,7 +239,6 @@ class LoggerWindow(QtWidgets.QMainWindow):
       3: "MINSTEP",
       4: "QP_FAIL",
     }
-    self._status_bars: Dict[int, pg.BarGraphItem] = {}
 
     self._init_ui()
 
@@ -266,22 +262,18 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self.glw = pg.GraphicsLayoutWidget()
     layout.addWidget(self.glw, 1)
 
-    # -------------------------
-    # Pens (explicit colors)
-    # -------------------------
-    pen_act   = _mk_pen("solid", width=3, color="b")                  # blue solid
-    pen_des   = _mk_pen("dash",  width=3, color="r")                  # red dashed
-    pen_raw   = _mk_pen("dot",   width=3, color="k")                  # black dotted
-    pen_total = _mk_pen("dot",   width=3, color="k")                  # black dotted
-    pen_cot   = _mk_pen("solid", width=3, color=(255, 105, 180))      # pink solid
-    pen_thr   = _mk_pen("solid", width=3, color="b")                  # blue solid
-    pen_rcot_x_cmd = _mk_pen("dash",  width=3, color="r")  # red dashed
-    pen_rcot_x_act = _mk_pen("solid", width=3, color="r")  # red solid
-    pen_rcot_y_cmd = _mk_pen("dash",  width=3, color="b")  # blue dashed
-    pen_rcot_y_act = _mk_pen("solid", width=3, color="b")  # blue solid
+    pen_act   = _mk_pen("solid", width=3, color="b")
+    pen_des   = _mk_pen("dash",  width=3, color="r")
+    pen_raw   = _mk_pen("dot",   width=3, color="k")
+    pen_total = _mk_pen("dot",   width=3, color="k")
+    pen_cot   = _mk_pen("solid", width=3, color=(255, 105, 180))
+    pen_thr   = _mk_pen("solid", width=3, color="b")
+    pen_rcot_x_cmd = _mk_pen("dash",  width=3, color="r")
+    pen_rcot_x_act = _mk_pen("solid", width=3, color="r")
+    pen_rcot_y_cmd = _mk_pen("dash",  width=3, color="b")
+    pen_rcot_y_act = _mk_pen("solid", width=3, color="b")
     rotor_colors = ["b", "g", "m", "c"]
 
-    # Helper: create plot and link X to master
     def _mk_plot(row: int, col: int, title: str,
                 add_legend: bool = True,
                 y_range: Optional[Tuple[float, float]] = None) -> pg.PlotItem:
@@ -295,16 +287,14 @@ class LoggerWindow(QtWidgets.QMainWindow):
         leg = p.addLegend(offset=(10, 10))
         leg.setZValue(1000)
 
-      # collect & link
       self._all_plots.append(p)
       if self._x_master is None:
         self._x_master = p
       else:
         p.setXLink(self._x_master)
-
       return p
 
-    # ========== Row 1: Position (y, x, z) ==========
+    # Row 1: Position
     p1c1 = _mk_plot(0, 0, "pos_y [mm]", y_range=(-1200., 1200.))
     p1c2 = _mk_plot(0, 1, "pos_x [mm]", y_range=(-1200., 1200.))
     p1c3 = _mk_plot(0, 2, "pos_z [mm]", y_range=(-1200., 1200.))
@@ -316,7 +306,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._curves["pos_z_des"] = p1c3.plot(pen=pen_des, name="des")
     self._curves["pos_z_act"] = p1c3.plot(pen=pen_act, name="act")
 
-    # ========== Row 2: RPY ==========
+    # Row 2: RPY
     p2c1 = _mk_plot(1, 0, "roll [deg]", y_range=(-30., 30.))
     p2c2 = _mk_plot(1, 1, "pitch [deg]", y_range=(-30., 30.))
     p2c3 = _mk_plot(1, 2, "yaw [deg]", y_range=(-20., 20.))
@@ -333,7 +323,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._curves["yaw_mrg"]   = p2c3.plot(pen=pen_des, name="MRG ref")
     self._curves["yaw_act"]   = p2c3.plot(pen=pen_act, name="act")
 
-    # ========== Row 3: tau ==========
+    # Row 3: tau
     p3c1 = _mk_plot(2, 0, "tau_x [N·m]", y_range=(-3., 3.))
     p3c2 = _mk_plot(2, 1, "tau_y [N·m]", y_range=(-3., 3.))
     p3c3 = _mk_plot(2, 2, "tau_z [N·m]", y_range=(-1., 1.))
@@ -348,8 +338,8 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
     self._curves["tau_z_total"]  = p3c3.plot(pen=pen_act, name="total")
 
-    # ========== Row 4: f1234 / tilt / f_total ==========
-    p4c1 = _mk_plot(3, 0, "f_thrust [N]", y_range=(11., 13.))
+    # Row 4: f1234 / tilt / f_total
+    p4c1 = _mk_plot(3, 0, "f_thrust [N]", y_range=(0., 80.))
     p4c2 = _mk_plot(3, 1, "tilt [deg]", y_range=(-30., 30.))
     p4c3 = _mk_plot(3, 2, "f_total [N]", y_range=(0., 80.))
 
@@ -365,28 +355,24 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
     self._curves["f_total"] = p4c3.plot(pen=pen_act, name="act")
 
-    # ========== Row 5: r_cot / solve_ms / solve_status ==========
+    # Row 5: r_cot / solve_ms / solve_status (restored)
     p5c1 = _mk_plot(4, 0, "r_cot [mm]", y_range=(-50., 50.))
-    p5c2 = _mk_plot(4, 1, "solve_ms [ms]", y_range=(0., 5.))
+    p5c2 = _mk_plot(4, 1, "solve_ms [ms]", y_range=(0., 10.))
     p5c3 = _mk_plot(4, 2, "solve_status", add_legend=True)
 
     self._curves["rcot_x_cmd"] = p5c1.plot(pen=pen_rcot_x_cmd, name="MRG cmd x")
     self._curves["rcot_x_act"] = p5c1.plot(pen=pen_rcot_x_act, name="act x")
-
     self._curves["rcot_y_cmd"] = p5c1.plot(pen=pen_rcot_y_cmd, name="MRG cmd y")
     self._curves["rcot_y_act"] = p5c1.plot(pen=pen_rcot_y_act, name="act y")
 
-
     self._curves["solve_ms"] = p5c2.plot(pen=pen_act, name="solve_ms")
 
-    # status plot: fixed y ticks + scatter squares
     self._status_plot = p5c3
     self._status_plot.setLabel("left", "status")
     self._status_plot.setYRange(-1.1, 4.5, padding=0.05)
     self._status_plot.getAxis("left").setTicks([[(i, str(i)) for i in range(5)]])
 
     leg = self._status_plot.legend
-
     for s in range(5):
       c = self._status_colors[s]
       dummy = pg.PlotDataItem(
@@ -413,7 +399,6 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
       tt = (t - t[0]).astype(np.float64)
 
-      # conversions
       pos_act_mm = _mm(ch["pos"])
       pos_des_mm = _mm(ch["pos_d"])
 
@@ -482,15 +467,14 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
       self._curves["solve_ms"].setData(tt, solve_ms)
 
-      # Status bar plot (y = -1 -> status)
+      # solve_status bars
       dt = float(np.median(np.diff(tt))) if tt.size >= 2 else 0.01
       x = tt
-      y = solve_status.astype(np.int32)
+      y = solve_status
 
       for s in range(5):
         mask = (y == s)
         xs = x[mask]
-
         y0 = -1.0
         heights = np.full(xs.shape, float(s + 1), dtype=np.float32)
         width = dt if s == 0 else 6.0 * dt
@@ -515,7 +499,6 @@ class LoggerWindow(QtWidgets.QMainWindow):
             brush=pg.mkBrush(*self._status_colors[s]),
             pen=None,
           )
-
 
       self.lbl_stat.setText(
         f"wc={wc} | samples={tt.size} | last solve_ms={float(solve_ms[-1]):.3f} | last status={int(solve_status[-1])}"
