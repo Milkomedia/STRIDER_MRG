@@ -162,9 +162,9 @@ void fdcl::control::load_config(void){
   kI  = param::kI;
   kyI = param::kyI;
 
-  sat_sigma_x_ = param::kIX_SAT[0];
-  sat_sigma_y_ = param::kIX_SAT[1];
-  sat_sigma_z_ = param::kIX_SAT[2];
+  sat_sigma_x_ = param::kIX_SAT[0] / param::kIX[0];
+  sat_sigma_y_ = param::kIX_SAT[1] / param::kIX[1];
+  sat_sigma_z_ = param::kIX_SAT[2] / param::kIX[2];
 
   this->m = param::M;
   this->g = param::G;

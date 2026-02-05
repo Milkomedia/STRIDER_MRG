@@ -44,7 +44,7 @@ static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Z_RANGE       = 1.0;   // [m] k mapped to [0, +k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
-static constexpr double SBUS_L_RANGE[2]    = { 0.45, 0.55};  // [m]
+static constexpr double SBUS_L_RANGE[2]    = { 0.48, 0.55};  // [m]
 static constexpr double SBUS_COTZ_RANGE[2] = {-0.1, -0.25};  // [m]
 
 // ===== OptiTrack offsets =====
@@ -103,7 +103,7 @@ static constexpr const char* CAN_PORT_NAME  = "can0";
 static constexpr const char* MOCAP_TYPE     = "optitrack";
 static constexpr const char* OPTI_IP        = "192.168.10.115";
 static constexpr const char* RIGIDBODY_NAME = "strider";
-static constexpr const char* Log_File_NAME = "controller_log.bin";
+static constexpr const char* Log_File_NAME = "0205_.bin";
 
 } // namespace param
 

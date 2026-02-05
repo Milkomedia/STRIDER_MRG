@@ -3,10 +3,10 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 
-fileday = "controller_log"
+fileday = "0205_"
 filename = fileday + sys.argv[1] + ".bin" if len(sys.argv) >= 2 else fileday + ".bin"
 
-THRUST_LP_CUTOFF_HZ = 1000000000
+THRUST_LP_CUTOFF_HZ = 1e9
 
 def lowpass_1pole(x, t, cutoff_hz):
     x = np.asarray(x, dtype=np.float64)
@@ -25,64 +25,25 @@ def lowpass_1pole(x, t, cutoff_hz):
         y[k] = y[k - 1] + alpha * (x[k] - y[k - 1])
     return y.squeeze()
 
-# ---- optional helpers kept (not used if you only view fig1/fig2) ----
-def rpy_to_R(roll, pitch, yaw):
-    cr, sr = np.cos(roll), np.sin(roll)
-    cp, sp = np.cos(pitch), np.sin(pitch)
-    cy, sy = np.cos(yaw), np.sin(yaw)
-    Rz = np.array([[cy, -sy, 0.0],
-                   [sy,  cy, 0.0],
-                   [0.0, 0.0, 1.0]])
-    Ry = np.array([[ cp, 0.0, sp],
-                   [0.0, 1.0, 0.0],
-                   [-sp, 0.0, cp]])
-    Rx = np.array([[1.0, 0.0, 0.0],
-                   [0.0,  cr, -sr],
-                   [0.0,  sr,  cr]])
-    return Rz @ Ry @ Rx
-
-def rodrigues(axis, ang):
-    axis = np.asarray(axis, dtype=np.float64)
-    axis = axis / (np.linalg.norm(axis) + 1e-12)
-    ax, ay, az = axis
-    K = np.array([[0.0, -az,  ay],
-                  [ az, 0.0, -ax],
-                  [-ay,  ax, 0.0]], dtype=np.float64)
-    I = np.eye(3, dtype=np.float64)
-    return I + np.sin(ang) * K + (1.0 - np.cos(ang)) * (K @ K)
-
-def vec_to_sph_deg(v):
-    v = np.asarray(v, dtype=np.float64)
-    vn = np.linalg.norm(v, axis=-1, keepdims=True)
-    vn = np.maximum(vn, 1e-12)
-    u = v / vn
-    alpha = np.degrees(np.arccos(np.clip(u[..., 2], -1.0, 1.0)))
-    beta  = np.degrees(np.arctan2(u[..., 1], u[..., 0]))
-    return alpha, beta
-
 log_dtype = np.dtype([
-    ("t",         "<f4"),
-    ("pos_d",     "<f4", (3,)),
-    ("pos",       "<f4", (3,)),
-    ("vel",       "<f4", (3,)),
-    ("rpy",       "<f4", (3,)),
-    ("omega",     "<f4", (3,)),
-    ("rpy_raw",   "<f4", (3,)),
-    ("rpy_d",     "<f4", (3,)),
+    ("t",        "<f4"),
+    ("pos_d",    "<f4", (3,)),
+    ("pos",      "<f4", (3,)),
+    ("vel",      "<f4", (3,)),
+    ("rpy",      "<f4", (3,)),
+    ("omega",    "<f4", (3,)),
+    ("rpy_raw",  "<f4", (3,)),
+    ("rpy_d",    "<f4", (3,)),
     ("tau_d",     "<f4", (3,)),
     ("tau_off",   "<f4", (2,)),
     ("tau_thrust","<f4", (2,)),
-    ("tilt_rad",  "<f4", (4,)),
-    ("f_thrust",  "<f4", (4,)),
-    ("f_total",   "<f4"),
+    ("tilt_rad", "<f4", (4,)),
+    ("f_thrust", "<f4", (4,)),
+    ("f_total",  "<f4"),
     ("r_cot",     "<f4", (2,)),
     ("r_cot_cmd", "<f4", (2,)),
-    ("solve_ms",  "<f4"),
+    ("solve_ms",    "<f4"),
     ("solve_status","<i4"),
-    ("l",         "<f4"),
-    ("r_cot_cmd3","<f4", (3,)),
-    ("q_mea",     "<f4", (20,)),
-    ("q_d",       "<f4", (20,)),
 ], align=False)
 
 def load_log_new_only(fn):
@@ -118,10 +79,12 @@ wrench[:, 1:4] = data["tau_d"].astype(np.float64)
 f_thrust = data["f_thrust"].astype(np.float64)
 f_thrust_lp = lowpass_1pole(f_thrust, t, THRUST_LP_CUTOFF_HZ)
 
+# r_cot (read) and r_cot_cmd (cmd)
+r_cot     = data["r_cot"].astype(np.float64)       # (N,2)
+r_cot_cmd = data["r_cot_cmd"].astype(np.float64)   # (N,2)
+
 print(f"File: {filename}")
-dt = np.gradient(t)
-dt = np.where((dt > 1e-9) & np.isfinite(dt), dt, np.nan)
-print(f"Samples: {len(t)}, Time: {t[0]:.3f} ~ {t[-1]:.3f} s, dt~ {np.nanmedian(dt):.6f} s")
+print(f"Samples: {len(t)}, Time: {t[0]:.3f} ~ {t[-1]:.3f} s")
 
 # ----------------- Fig1: state -----------------
 fig, axs = plt.subplots(4, 3, figsize=(15, 10), sharex=True)
@@ -157,8 +120,8 @@ for i in range(3):
 fig.suptitle("State / Desired / Velocity / Attitude")
 plt.tight_layout()
 
-# ----------------- Fig2: wrench/thrust (NO hz) -----------------
-fig2, axs2 = plt.subplots(5, 1, figsize=(10, 10), sharex=True)
+# ----------------- Fig2: wrench/thrust + (add) r_cot_x/y read vs cmd -----------------
+fig2, axs2 = plt.subplots(7, 1, figsize=(10, 14), sharex=True)
 
 w_labels = ['Fz (f_total)', 'tau_roll (tau_d.x)', 'tau_pitch (tau_d.y)', 'tau_yaw (tau_d.z)']
 for i in range(4):
@@ -171,11 +134,25 @@ axs2[4].plot(t, f_thrust_lp[:, 1], label='f2')
 axs2[4].plot(t, f_thrust_lp[:, 2], label='f3')
 axs2[4].plot(t, f_thrust_lp[:, 3], label='f4')
 axs2[4].set_ylabel(f"thrust [N]\nLPF {THRUST_LP_CUTOFF_HZ:.1f}Hz")
-axs2[4].set_xlabel('time [s]')
 axs2[4].legend()
 axs2[4].grid(True)
 
-fig2.suptitle("Wrench / Thrust(4)")
+# r_cot_x (read vs cmd)
+axs2[5].plot(t, r_cot[:, 0], label='read')
+axs2[5].plot(t, r_cot_cmd[:, 0], '--', label='cmd')
+axs2[5].set_ylabel("r_cot_x [m]")
+axs2[5].legend()
+axs2[5].grid(True)
+
+# r_cot_y (read vs cmd)
+axs2[6].plot(t, r_cot[:, 1], label='read')
+axs2[6].plot(t, r_cot_cmd[:, 1], '--', label='cmd')
+axs2[6].set_ylabel("r_cot_y [m]")
+axs2[6].set_xlabel('time [s]')
+axs2[6].legend()
+axs2[6].grid(True)
+
+fig2.suptitle("Wrench / Thrust(4) / r_cot (read vs cmd)")
 plt.tight_layout()
 
 plt.show()

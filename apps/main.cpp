@@ -132,6 +132,9 @@ int main() {
   Command cmd{};
   double rising_coeff = param::INITIAL_RISING_COEFF;
 
+  cmd.l        =  0.48;
+  cmd.r_cot(2) = -0.24;
+
   // --- MRG parameters ---
   bool mpc_in_solving = false;
   uint32_t mpc_key = 1;
@@ -221,8 +224,8 @@ int main() {
       if (sbus.read_latest(sbus_frame)) {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        cmd.l        = sbus_l_map(sbus_frame.ch[11]);
-        cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+        // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+        // cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -363,7 +366,8 @@ int main() {
       }
       else { // solve failed
         cmd.d_theta  *= 0.9;
-        cmd.r_cot    *= 0.9;
+        cmd.r_cot(0)    *= 0.9;
+        cmd.r_cot(1)    *= 0.9;
         l_mpc_output.u_rate.setZero();
       }
 
@@ -377,6 +381,12 @@ int main() {
     // ==== ATTITUDE CONTROL [133907ns] ====
     const Eigen::Matrix3d R_d = R_raw * expm_hat(cmd.d_theta);
     Eigen::Vector3d tau_des = gac.attitude_control(R_d);
+
+    // 일단 무서워서 해둔 클램프
+    const double saturation_torque = 5.0;
+    tau_des.x() = std::clamp(tau_des.x(), -saturation_torque, saturation_torque);
+    tau_des.y() = std::clamp(tau_des.y(), -saturation_torque, saturation_torque);
+    tau_des.z() = std::clamp(tau_des.z(), -saturation_torque, saturation_torque);
     
     // ==== CONTORL ALLOCATION [207279ns] ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (f_1234 > 0)
@@ -412,6 +422,7 @@ int main() {
         rising_coeff += param::RISING_COEFF_INC;
         if (rising_coeff >= 1.0) {
           rising_coeff = 1.0;
+          for (int i = 0; i < 4; ++i) { pwm(i) *= rising_coeff; }
           phase = Phase::GAC_FLIGHT;
           std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
         }
@@ -423,7 +434,7 @@ int main() {
     else {teensy.write_zeros();}
 
     // --- Dynamixel write [355ns] ---
-    // if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
+    if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
     // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
     {

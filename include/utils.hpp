@@ -445,6 +445,22 @@ static inline double sbus_cotz_map(const uint16_t ch10) {
   return param::SBUS_COTZ_RANGE[0] + static_cast<double>(ch10 - 352) * cotz_factor_;
 }
 
+// 시정수 디버깅용
+static inline double sbus_rcotx_map(const uint16_t ch10) {
+  static constexpr double RCOTX_MIN = -0.05;
+  static constexpr double RCOTX_MAX =  0.05; //[m]
+  static constexpr double factor_ = (RCOTX_MAX - RCOTX_MIN) / 1344.0;
+  return RCOTX_MIN + static_cast<double>(ch10 - 352) * factor_;
+}
+
+static inline double sbus_rcoty_map(const uint16_t ch11) {
+  static constexpr double RCOTY_MIN = -0.05;
+  static constexpr double RCOTY_MAX =  0.05; //[m]
+  static constexpr double factor_ = (RCOTY_MAX - RCOTY_MIN) / 1344.0;
+  return RCOTY_MIN + static_cast<double>(ch11 - 352) * factor_;
+}
+
+
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.
 static inline void try_set_prior(int prio) {
