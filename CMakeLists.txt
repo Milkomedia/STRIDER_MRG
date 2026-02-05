@@ -63,13 +63,63 @@ endif()
 # Python / pybind11
 # =============================================================================
 if(STRIDER_ENABLE_MPC_PY)
-  # Prefer Conda Python if available.
-  if(DEFINED ENV{CONDA_PREFIX})
-    set(Python3_ROOT_DIR "$ENV{CONDA_PREFIX}" CACHE PATH "Conda env root" FORCE)
-    set(Python3_EXECUTABLE "$ENV{CONDA_PREFIX}/bin/python3" CACHE FILEPATH "Conda python" FORCE)
+  set(Python3_FIND_STRATEGY LOCATION CACHE STRING "Prefer explicit interpreter path" FORCE)
+
+  # Candidate list: (1) active conda python, (2) system python3.11, (3) fallback python3.
+  set(_STRIDER_PY_CANDIDATES "")
+  if(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/bin/python3")
+    list(APPEND _STRIDER_PY_CANDIDATES "$ENV{CONDA_PREFIX}/bin/python3")
   endif()
 
-  find_package(Python3 COMPONENTS Interpreter Development.Embed REQUIRED)
+  find_program(_STRIDER_PY311 NAMES python3.11 HINTS /usr/bin /usr/local/bin)
+  if(_STRIDER_PY311)
+    list(APPEND _STRIDER_PY_CANDIDATES "${_STRIDER_PY311}")
+  endif()
+  find_program(_STRIDER_PY3 NAMES python3 HINTS /usr/bin /usr/local/bin)
+  if(_STRIDER_PY3)
+    list(APPEND _STRIDER_PY_CANDIDATES "${_STRIDER_PY3}")
+  endif()
+
+  # Pick the first interpreter that can import acados_template.
+  set(_STRIDER_PY_OK "")
+  foreach(_py IN LISTS _STRIDER_PY_CANDIDATES)
+    execute_process(
+      COMMAND "${_py}" -c "import acados_template"
+      RESULT_VARIABLE _rc
+      OUTPUT_QUIET ERROR_QUIET
+    )
+    if(_rc EQUAL 0)
+      set(_STRIDER_PY_OK "${_py}")
+      break()
+    endif()
+  endforeach()
+
+  if(_STRIDER_PY_OK)
+    set(Python3_EXECUTABLE "${_STRIDER_PY_OK}" CACHE FILEPATH "Python used for embedded MPC" FORCE)
+  endif()
+
+  # Require 3.11+ (your working configuration); adjust if you later support other versions.
+  find_package(Python3 3.11 COMPONENTS Interpreter Development.Embed REQUIRED)
+
+  # Hard fail early with a clear message if acados_template is still not importable.
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import acados_template"
+    RESULT_VARIABLE _acados_template_rc
+    OUTPUT_QUIET ERROR_QUIET
+  )
+  if(NOT _acados_template_rc EQUAL 0)
+    message(FATAL_ERROR
+      "Selected Python (${Python3_EXECUTABLE}) cannot import 'acados_template'.\n"
+      "Fix: install/make it importable in this interpreter, or configure with -DPython3_EXECUTABLE=... "
+      "pointing to a Python where 'import acados_template' works."
+    )
+  endif()
+
+  unset(_STRIDER_PY_CANDIDATES)
+  unset(_STRIDER_PY311)
+  unset(_STRIDER_PY3)
+  unset(_STRIDER_PY_OK)
+  unset(_acados_template_rc)
 
   execute_process(
     COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmakedir
