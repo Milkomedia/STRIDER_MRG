@@ -10,13 +10,13 @@ namespace param {
 
 // ===== Geometry control =====
 // --- pos&att ctrl gain
-static constexpr double kX[3]  = {28.5, 28.5, 15.00}; // Position gain [x, y, z]
-static constexpr double kV[3]  = {18.0, 18.0,  7.00}; // Velocity gain [x, y, z]
-static constexpr double kR[3]  = {10.7, 10.7,  3.42}; // Rotational gain [roll, pitch, yaw]
-static constexpr double kW[3]  = { 4.5,  4.5,  2.95}; // angular Velocity gain [roll, pitch, yaw]
+static constexpr double kX[3]  = {28.5, 28.5, 26.00}; // Position gain [x, y, z]
+static constexpr double kV[3]  = {18.0, 18.0, 17.00}; // Velocity gain [x, y, z]
+static constexpr double kR[3]  = {20.0, 20.0,  3.42}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kW[3]  = { 5.5,  5.5,  2.95}; // angular Velocity gain [roll, pitch, yaw]
 
-static constexpr double kI     = 0.80;  // Attitude integral gain for roll and pitch
-static constexpr double kyI    = 1.00;  // Attitude integral gain for yaw
+static constexpr double kI     = 2.75;  // Attitude integral gain for roll and pitch
+static constexpr double kyI    = 1.20;  // Attitude integral gain for yaw
 static constexpr double kIX[3] = {15.0, 15.0, 20.0}; // Position integral gain [x, y, z]
 static constexpr double kIX_SAT[3] = {15.0, 15.0, 20.0}; // Position integral saturation on x,y,z [N]
 
@@ -62,8 +62,8 @@ static constexpr std::chrono::steady_clock::duration MAX_PULL_TICK = std::chrono
 static constexpr std::chrono::steady_clock::duration MPC_DT        = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(5000));
 
 // ===== Take-off parameters =====
-static constexpr double IDLE_PWM_DUTY = 0.17; // override pwm duty [0.0~1.0]
-static constexpr double TAKE_OFF_TIME = 4.0;  // smoothing thime   [sec]
+static constexpr double IDLE_PWM_DUTY = 0.15; // override pwm duty [0.0~1.0]
+static constexpr double TAKE_OFF_TIME = 3.0;  // smoothing thime   [sec]
 static constexpr double INITIAL_RISING_COEFF = IDLE_PWM_DUTY / std::sqrt((M*G/4.0-PWM_B)/PWM_A) + 0.1; // this not tunable
 static constexpr double RISING_COEFF_INC = (1.0 - INITIAL_RISING_COEFF) * std::chrono::duration_cast<std::chrono::duration<double>>(CTRL_DT).count() / TAKE_OFF_TIME; // this not tunable
 

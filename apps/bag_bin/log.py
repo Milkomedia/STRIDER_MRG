@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 fileday = "0205_"
 filename = fileday + sys.argv[1] + ".bin" if len(sys.argv) >= 2 else fileday + ".bin"
 
-THRUST_LP_CUTOFF_HZ = 1e9
+THRUST_LP_CUTOFF_HZ = 0.1
 
 def lowpass_1pole(x, t, cutoff_hz):
     x = np.asarray(x, dtype=np.float64)

@@ -193,7 +193,9 @@ int main() {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
 
         // gyro frame transformation ()
-        s.omega(0) = gyro_bf[0].update(-t265_frame.omega[2], now); s.omega(1) = gyro_bf[1].update(t265_frame.omega[0], now); s.omega(2) = gyro_bf[2].update(t265_frame.omega[1], now);
+        s.omega(0) = -t265_frame.omega[2]; 
+        s.omega(1) =  t265_frame.omega[0]; 
+        s.omega(2) = gyro_bf[2].update(-t265_frame.omega[1], now);
 
         last_t265_cnt = cur_t265_cnt;
       }
@@ -225,7 +227,8 @@ int main() {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
         // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
-        // cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+        cmd.r_cot(0) = sbus_rcotx_map(sbus_frame.ch[10]);
+        cmd.r_cot(1) = sbus_rcoty_map(sbus_frame.ch[11]);
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -341,8 +344,8 @@ int main() {
         }
       }
       else { // cot goes to zero when MPC deactivated
-        cmd.r_cot(0) *= 0.995;
-        cmd.r_cot(1) *= 0.995;
+        // cmd.r_cot(0) *= 0.995;
+        // cmd.r_cot(1) *= 0.995;
       }
     }
 
@@ -361,13 +364,13 @@ int main() {
     if (got_mpc) { // MPC get
       if (l_mpc_output.state == 0) {
         cmd.d_theta = l_mpc_output.u_opt.template head<3>();                  // [0,1,2]
-        cmd.r_cot(0) = 0.995 * cmd.r_cot(0) + 0.005 * l_mpc_output.u_opt(3);  // [3]
-        cmd.r_cot(1) = 0.995 * cmd.r_cot(1) + 0.005 * l_mpc_output.u_opt(4);  // [4]
+        // cmd.r_cot(0) = 0.995 * cmd.r_cot(0) + 0.005 * l_mpc_output.u_opt(3);  // [3]
+        // cmd.r_cot(1) = 0.995 * cmd.r_cot(1) + 0.005 * l_mpc_output.u_opt(4);  // [4]
       }
       else { // solve failed
         cmd.d_theta  *= 0.9;
-        cmd.r_cot(0)    *= 0.9;
-        cmd.r_cot(1)    *= 0.9;
+        // cmd.r_cot(0)    *= 0.9;
+        // cmd.r_cot(1)    *= 0.9;
         l_mpc_output.u_rate.setZero();
       }
 
