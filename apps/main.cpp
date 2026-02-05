@@ -52,7 +52,6 @@ int main() {
     pybind11::scoped_interpreter py_guard{false};
     strider_mpc::acados_wrapper mpc; // compile acados before start.
     std::fprintf(stdout, " ||----------------------------------||\n ||       Acados compile done.       ||\n ||     You can turn on the MRG.     ||\n ||----------------------------------||\n\n");  std::fflush(stdout);
-    if (!g_killed.load()) {std::fprintf(stdout, " STRIDER: \"LET'S ROLL.\"\n\n"); std::fflush(stdout);}
 
     while (!g_killed.load()) {
       strider_mpc::MPCInput in_local;
@@ -155,6 +154,8 @@ int main() {
     while (!g_killed.load(std::memory_order_relaxed) && !dxl.read_latest(dxl_frame)) {_mm_pause();}
     if (g_killed.load(std::memory_order_relaxed)) {std::fprintf(stdout, "\n\n DXL ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
     else {std::fprintf(stdout, "Good   ]------||\n ||------------------------------------||\n\n\n"); std::fflush(stdout);}
+
+    if (!g_killed.load()) {std::fprintf(stdout, " STRIDER: \"LET'S ROLL.\"\n\n"); std::fflush(stdout);}
 
     // SBUS toggle check.
     if (sbus_frame.ch[7] != 1024 || sbus_frame.ch[8] != 352) {std::fprintf(stdout, "\n\n SBUS toggle set to wrong.\n Check the transmitter -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
