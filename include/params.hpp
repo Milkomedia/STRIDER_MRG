@@ -80,13 +80,20 @@ constexpr std::size_t NU_AUG   = 5;    // model augmented state dim
 constexpr std::size_t NU       = 5;    // model input dim
 constexpr std::size_t NP       = 11;   // model parameter dim
 
-// ===== RT Scheduling =====
+// ===== RT Scheduling & CPU IDs =====
 static constexpr int MAIN_PRIOR = 90;
 static constexpr int T265_PRIOR = 82;
 static constexpr int OPTI_PRIOR = 78;
 static constexpr int DXL_PRIOR  = 74;
 static constexpr int SBUS_PRIOR = 70;
 static constexpr int MPC_PRIOR  = 60;
+
+static constexpr int CPU_MAIN = 11;
+static constexpr int CPU_MPC  = 10;
+static constexpr int CPU_T265 = 9;
+static constexpr int CPU_OPTI = 9;
+static constexpr int CPU_DXL  = 21;
+static constexpr int CPU_SBUS = 21;
 
 // ===== Sensor & Actuator hardcoded config =====
 static constexpr const char* SBUS_PORT_NAME = "/dev/ttyUSB0";

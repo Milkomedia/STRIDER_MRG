@@ -167,7 +167,8 @@ void SBUS::run() {
   stop_request_.store(false, std::memory_order_relaxed);
   is_running_.store(true, std::memory_order_release);
 
-  try_set_realtime_hint_linux(param::SBUS_PRIOR);
+  try_pin_cpu(param::CPU_SBUS);
+  try_set_prior(param::SBUS_PRIOR);
 
   const uint64_t start_ns = now_steady_ns();
   uint64_t last_good_ns = 0;

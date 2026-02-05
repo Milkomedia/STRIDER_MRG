@@ -197,7 +197,8 @@ void Dynamixel::freeze_now_(double q_mea_rad[20], double q_cmd_rad[20], uint32_t
 void Dynamixel::run() {
   stop_request_.store(false, std::memory_order_relaxed);
 
-  try_set_realtime_hint_linux(param::DXL_PRIOR);
+  try_pin_cpu(param::CPU_DXL);
+  try_set_prior(param::DXL_PRIOR);
 
   uint32_t comm_err_cnt = 0;
   uint8_t hw_error_any = 0;

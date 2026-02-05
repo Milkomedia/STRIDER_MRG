@@ -457,11 +457,20 @@ static inline double sbus_cotz_map(const uint16_t ch10) {
 
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.
-static inline void try_set_realtime_hint_linux(int prio) {
+static inline void try_set_prior(int prio) {
   sched_param sp{};
   sp.sched_priority = prio;
   pthread_t th = pthread_self();
   (void)pthread_setschedparam(th, SCHED_FIFO, &sp);
+}
+
+// Best-effort CPU pin; will fail without sufficient permission in some setups.
+static inline void try_pin_cpu(int cpu_id) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(cpu_id, &set);
+  pthread_t th = pthread_self();
+  (void)pthread_setaffinity_np(th, sizeof(cpu_set_t), &set);
 }
 
 static inline uint64_t now_steady_ns() {

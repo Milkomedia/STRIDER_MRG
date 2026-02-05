@@ -33,8 +33,9 @@ static strider_mpc::MPCOutput g_mpc_output;
 static std::atomic<bool> g_mpc_activated{false};
 
 int main() {
+  try_pin_cpu(param::CPU_MAIN);
+  try_set_prior(param::MAIN_PRIOR);
   std::signal(SIGINT, sigint_handler); // SIGINT handler(ctrl+C)
-  try_set_realtime_hint_linux(param::MAIN_PRIOR);
 
   // --- CAN first check before start ---
   Teensy teensy;
@@ -47,6 +48,8 @@ int main() {
 
   // -------------- [ 1. MPC thread ] -----------------
   std::thread th_mpc([&]() {
+    try_pin_cpu(param::CPU_MPC);
+    try_set_prior(param::MPC_PRIOR);
     pybind11::scoped_interpreter py_guard{false};
     strider_mpc::acados_wrapper mpc; // compile acados before start.
     std::fprintf(stdout, " ||----------------------------------||\n ||       Acados compile done.       ||\n ||     You can turn on the MRG.     ||\n ||----------------------------------||\n\n");  std::fflush(stdout);

@@ -104,7 +104,8 @@ void Opti::run() {
   stop_request_.store(false, std::memory_order_relaxed);
   is_running_.store(true, std::memory_order_release);
 
-  try_set_realtime_hint_linux(param::OPTI_PRIOR);
+  try_pin_cpu(param::CPU_OPTI);
+  try_set_prior(param::OPTI_PRIOR);
 
   const std::string target = normalize_copy(param::RIGIDBODY_NAME);
   const std::string_view target_v = normalize_view(target);

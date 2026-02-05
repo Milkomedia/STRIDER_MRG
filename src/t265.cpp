@@ -226,7 +226,8 @@ void T265::run() {
   stop_request_.store(false, std::memory_order_relaxed);
   is_running_.store(true, std::memory_order_relaxed);
 
-  try_set_realtime_hint_linux(param::T265_PRIOR);
+  try_pin_cpu(param::CPU_T265);
+  try_set_prior(param::T265_PRIOR);
 
   try {
     const bool started = start_stream_();
