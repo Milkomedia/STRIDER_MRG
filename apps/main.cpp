@@ -34,7 +34,6 @@ static std::atomic<bool> g_mpc_activated{false};
 
 int main() {
   try_pin_cpu(param::CPU_MAIN);
-  try_set_prior(param::MAIN_PRIOR);
   std::signal(SIGINT, sigint_handler); // SIGINT handler(ctrl+C)
 
   // --- CAN first check before start ---
@@ -163,6 +162,9 @@ int main() {
   
     phase = Phase::ARMED;
   }
+
+  // set priority
+  try_set_prior(param::MAIN_PRIOR);
 
   // --- logging ---
   mmap_logger::MMapLogger logger("/tmp/strider_log.mmap", /*reset=*/true);

@@ -461,7 +461,11 @@ static inline void try_set_prior(int prio) {
   sched_param sp{};
   sp.sched_priority = prio;
   pthread_t th = pthread_self();
-  (void)pthread_setschedparam(th, SCHED_FIFO, &sp);
+  const int ret = pthread_setschedparam(th, SCHED_FIFO, &sp);
+  if (ret != 0) {
+    std::fprintf(stderr, "[RT] pthread_setschedparam(SCHED_FIFO,%d) failed: %s\n", prio, std::strerror(ret));
+    std::fflush(stderr);
+  }
 }
 
 // Best-effort CPU pin; will fail without sufficient permission in some setups.
