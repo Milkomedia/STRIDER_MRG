@@ -31,13 +31,13 @@ struct Command {
   Eigen::Vector3d pos = Eigen::Vector3d::Zero();        // desired linear position [m]
   Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector]
   double yaw = 0.0;                                     // desired heading yaw angle [rad] (projection of heading)
-  double l   = 0.55;                                    // desired inter-rotor distance [m]
+  double l   = 0.48;                                    // desired inter-rotor distance [m]
   Eigen::Matrix3d R_cot = Eigen::Matrix3d::Identity();  // desired CoT-body tilt cmd [SO3] (not updated)
   // This can only be changed by Control Allocation
   double tauz_bar  = 0.0;                              // current yaw thrust torque [N.m] (Sequential control allocation)
   // These can only be changed by MRG
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
-  Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.15);   // desired CoT position [m], z-element can be manually changable by SBUS
+  Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.24);   // desired CoT position [m], z-element can be manually changable by SBUS
 };
 
 struct Butter {
@@ -435,31 +435,25 @@ static inline Eigen::Vector3d sbus_yaw_map(double& yaw_d, const uint16_t ch3) {
   return out;
 }
 
-static inline double sbus_l_map(const uint16_t ch11) {
-  static constexpr double l_factor_ = (param::SBUS_L_RANGE[1] - param::SBUS_L_RANGE[0]) / 1344.0;
-  return param::SBUS_L_RANGE[0] + static_cast<double>(ch11 - 352) * l_factor_;
-}
-
 static inline double sbus_cotz_map(const uint16_t ch10) {
   static constexpr double cotz_factor_ = (param::SBUS_COTZ_RANGE[1] - param::SBUS_COTZ_RANGE[0]) / 1344.0;
   return param::SBUS_COTZ_RANGE[0] + static_cast<double>(ch10 - 352) * cotz_factor_;
 }
 
-// 시정수 디버깅용
-static inline double sbus_rcotx_map(const uint16_t ch10) {
-  static constexpr double RCOTX_MIN = -0.047;
-  static constexpr double RCOTX_MAX =  0.047; //[m]
-  static constexpr double factor_ = (RCOTX_MAX - RCOTX_MIN) / 1344.0;
-  return RCOTX_MIN + static_cast<double>(ch10 - 352) * factor_;
+static inline double sbus_l_map(const uint16_t ch11) {
+  static constexpr double l_factor_ = (param::SBUS_L_RANGE[1] - param::SBUS_L_RANGE[0]) / 1344.0;
+  return param::SBUS_L_RANGE[0] + static_cast<double>(ch11 - 352) * l_factor_;
 }
 
-static inline double sbus_rcoty_map(const uint16_t ch11) {
-  static constexpr double RCOTY_MIN = -0.047;
-  static constexpr double RCOTY_MAX =  0.047; //[m]
-  static constexpr double factor_ = (RCOTY_MAX - RCOTY_MIN) / 1344.0;
-  return RCOTY_MIN + static_cast<double>(ch11 - 352) * factor_;
+static inline double sbus_cotx_map(const uint16_t ch10) {
+  static constexpr double cotx_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1344.0;
+  return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch10 - 352) * cotx_factor_;
 }
 
+static inline double sbus_coty_map(const uint16_t ch11) {
+  static constexpr double coty_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1344.0;
+  return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch11 - 352) * coty_factor_;
+}
 
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.

@@ -132,9 +132,6 @@ int main() {
   Command cmd{};
   double rising_coeff = param::INITIAL_RISING_COEFF;
 
-  cmd.l        =  0.48;
-  cmd.r_cot(2) = -0.24;
-
   // --- MRG parameters ---
   bool mpc_in_solving = false;
   uint32_t mpc_key = 1;
@@ -192,10 +189,8 @@ int main() {
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
 
-        // gyro frame transformation ()
-        s.omega(0) = -t265_frame.omega[2]; 
-        s.omega(1) =  t265_frame.omega[0]; 
-        s.omega(2) = gyro_bf[2].update(-t265_frame.omega[1], now);
+        // gyro frame transformation
+        s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_bf[2].update(-t265_frame.omega[1], now);
 
         last_t265_cnt = cur_t265_cnt;
       }
@@ -226,9 +221,10 @@ int main() {
       if (sbus.read_latest(sbus_frame)) {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
-        cmd.r_cot(0) = sbus_rcotx_map(sbus_frame.ch[10]);
-        cmd.r_cot(1) = sbus_rcoty_map(sbus_frame.ch[11]);
+        cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+        cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+        // cmd.r_cot(0) = sbus_rcotx_map(sbus_frame.ch[10]);
+        // cmd.r_cot(1) = sbus_rcoty_map(sbus_frame.ch[11]);
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
