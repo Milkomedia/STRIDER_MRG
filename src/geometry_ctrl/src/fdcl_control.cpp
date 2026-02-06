@@ -46,7 +46,7 @@ void fdcl::control::position_control(void){
 
   // if norm(eX) exceeds limit, scale it back
   double eX_norm = eX.norm();
-  if(eX_norm > eX_norm_max_) {eX = eX * (eX_norm_max_ / eX_norm);}
+  if(eX_norm > param::EX_NORM_MAX) {eX = eX * (param::EX_NORM_MAX / eX_norm);}
 
   // position integral terms
   eIX.integrate(eX + eV, dt); // eq (13)
@@ -112,7 +112,7 @@ Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& R_d){
 
   // if norm(eR) exceeds limit, scale it back
   double eR_norm = eR.norm();
-  if(eR_norm > eR_norm_max_) {eR = eR * (eR_norm_max_ / eR_norm);}
+  if(eR_norm > param::ER_NORM_MAX) {eR = eR * (param::ER_NORM_MAX / eR_norm);}
 
   eW = state->W - state->R.transpose() * command->Rd * command->Wd;
 
@@ -124,6 +124,11 @@ Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& R_d){
       + hat(state->R.transpose() * command->Rd * command->Wd) * state->J * \
             state->R.transpose() * command->Rd * command->Wd \
       + state->J * state->R.transpose() * command->Rd * command->Wd_dot;
+
+  // clamp torque xyz
+  M.x() = std::clamp(M.x(), -param::ROLL_TORQUE_SAT, param::ROLL_TORQUE_SAT);
+  M.y() = std::clamp(M.y(), -param::PITCH_TORQUE_SAT, param::PITCH_TORQUE_SAT);
+  M.z() = std::clamp(M.z(), -param::YAW_TORQUE_SAT, param::YAW_TORQUE_SAT);
 
   return M;
 }

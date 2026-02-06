@@ -380,12 +380,6 @@ int main() {
     // ==== ATTITUDE CONTROL [133907ns] ====
     const Eigen::Matrix3d R_d = R_raw * expm_hat(cmd.d_theta);
     Eigen::Vector3d tau_des = gac.attitude_control(R_d);
-
-    // 일단 무서워서 해둔 클램프
-    const double saturation_torque = 5.0;
-    tau_des.x() = std::clamp(tau_des.x(), -saturation_torque, saturation_torque);
-    tau_des.y() = std::clamp(tau_des.y(), -saturation_torque, saturation_torque);
-    tau_des.z() = std::clamp(tau_des.z(), -saturation_torque, saturation_torque);
     
     // ==== CONTORL ALLOCATION [207279ns] ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (f_1234 > 0)
@@ -511,11 +505,8 @@ int main() {
       }
     }
 
-    // [1815030ns]
-    // delay for keep control loop Hz
-    // May wake up a little early for fresh imu data.
+    // delay for keeping control Hz. May wake up a little early for fresh imu data. [1815030ns]
     const std::chrono::steady_clock::time_point done_tick = std::chrono::steady_clock::now();
-    
     if (done_tick < next_control_tick) {
       if(t265.wait_new_frame_until(next_control_tick, last_t265_cnt)){
         std::chrono::steady_clock::duration pull_tick = next_control_tick - std::chrono::steady_clock::now();

@@ -50,9 +50,6 @@ public:
   void integral_reset();
 
 private:
-  const double eX_norm_max_ = 2.0; /**< Saturating term of position error */
-  const double eR_norm_max_ = 50.0 * M_PI / 180.0; /**< Saturating term of attitude error */
-
   fdcl::state_t *state = nullptr; /**< Pointer to the current states */
   fdcl::command_t *command = nullptr; /**< Pointer to the desired states */
 

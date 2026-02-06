@@ -16,13 +16,6 @@ Vector3 vee(const Matrix3 V){
   return  v;
 }
 
-void saturate(Vector3 &x, const double x_min, const double x_max){
-  for (int i = 0; i < 3; i++){
-    if (x(i) > x_max){x(i) = x_max;}
-    else if (x(i) < x_min){x(i) = x_min;}
-  }
-}
-
 void deriv_unit_vector( \
     const Vector3 &A, const Vector3 &A_dot, const Vector3 &A_ddot, \
     Vector3 &q, Vector3 &q_dot, Vector3 &q_ddot){

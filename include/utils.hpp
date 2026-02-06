@@ -335,7 +335,7 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
   // yaw wrench conversion
   tauz_bar = param::SERVO_DELAY_ALPHA*tau_d(2) + param::SERVO_DELAY_BETA*tauz_bar;
   double tauz_r = tau_d(2) - tauz_bar;
-  double tauz_r_sat = std::clamp(tauz_r, param::TAUZ_MIN, param::TAUZ_MAX);
+  double tauz_r_sat = std::clamp(tauz_r, -param::REACTION_TORQUE_SAT, param::REACTION_TORQUE_SAT);
   double tauz_t = tauz_bar + tauz_r - tauz_r_sat;
 
   // FK for each arm
@@ -377,8 +377,8 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
   if (lu_1.isInvertible()) {C1_des = lu_1.solve(B1);}
   else {C1_des = (A1.transpose()*A1 + 1e-8*Eigen::Matrix4d::Identity()).ldlt().solve(A1.transpose()*B1);}
 
-  // Thrust clamp (5%~98%)
-  for (uint8_t i = 0; i < 4; ++i) {C1_des(i) = std::clamp(C1_des(i), 8.7, 53.3);}
+  // Thrust clamp
+  for (uint8_t i = 0; i < 4; ++i) {C1_des(i) = std::clamp(C1_des(i), param::MINIMUM_THRUST_SAT, param::MAXIMUM_THRUST_SAT);}
 
   // tilt allocation
   Eigen::Matrix4d A2;
@@ -402,6 +402,10 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
   Eigen::FullPivLU<Eigen::Matrix4d> lu_2(A2);
   if (lu_2.isInvertible()) {C2_des = lu_2.solve(B2);}
   else {C2_des = (A2.transpose()*A2 + 1e-8*Eigen::Matrix4d::Identity()).ldlt().solve(A2.transpose()*B2);}
+
+  // Tilt angle clamp
+  for (uint8_t i = 0; i < 4; ++i) {C2_des(i) = std::clamp(C2_des(i), -param::TILT_ANGLE_SAT, param::TILT_ANGLE_SAT);}
+
 }
 
 // --------- [ SBUS channel mapping ] ---------
