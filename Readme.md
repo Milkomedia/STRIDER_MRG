@@ -40,6 +40,6 @@ python3 strider_logger.py
 ```
 - Real-time MRG single-horizon viewer
 ```bash
-cd resources/mpc_py
+cd acados
 python3 mpc_viewer.py
 ```
