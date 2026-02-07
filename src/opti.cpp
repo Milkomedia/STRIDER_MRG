@@ -124,7 +124,7 @@ void Opti::run() {
       mc_->waitForNextFrame();
 
       const uint64_t host_ns = now_steady_ns();
-      const auto now_tp = std::chrono::steady_clock::now();
+      const auto now = std::chrono::steady_clock::now();
 
       const auto& rbs = mc_->rigidBodies();
       bool found = false;
@@ -153,9 +153,9 @@ void Opti::run() {
           v_raw = diff(p, p_prev, host_ns, prev_ns_);
         }
 
-        const double vx_f = vel_bf_[0].update(v_raw(0), now_tp);
-        const double vy_f = vel_bf_[1].update(v_raw(1), now_tp);
-        const double vz_f = vel_bf_[2].update(v_raw(2), now_tp);
+        const double vx_f = vel_bf_[0].update(v_raw(0), now);
+        const double vy_f = vel_bf_[1].update(v_raw(1), now);
+        const double vz_f = vel_bf_[2].update(v_raw(2), now);
 
         Eigen::Vector3d a = Eigen::Vector3d::Zero();
         {
