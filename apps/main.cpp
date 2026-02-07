@@ -429,7 +429,7 @@ int main() {
     // --- Dynamixel write [355ns] ---
     if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
-    // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
+    // ------ [Data logging] -----------------------------------------------------------------------------
     {
       mmap_logger::LogData ld{};
 
@@ -442,7 +442,6 @@ int main() {
       ld.pos[0] = static_cast<float>(s.pos(0));
       ld.pos[1] = static_cast<float>(s.pos(1));
       ld.pos[2] = static_cast<float>(s.pos(2));
-
 
       ld.vel[0] = static_cast<float>(s.vel(0));
       ld.vel[1] = static_cast<float>(s.vel(1));
@@ -473,37 +472,54 @@ int main() {
       ld.tau_d[1] = static_cast<float>(tau_des(1));
       ld.tau_d[2] = static_cast<float>(tau_des(2));
 
-      // CoT-offset torque around x,y
-      const double f_total = gac.f_total;
-      const Eigen::Vector2d tau_off(-f_total * s.r_cot(1), f_total * s.r_cot(0));
-      ld.tau_off[0] = static_cast<float>(tau_off(0));
-      ld.tau_off[1] = static_cast<float>(tau_off(1));
+      {
+        const double f_total = gac.f_total;
+        const Eigen::Vector2d tau_off(-f_total * s.r_cot(1), f_total * s.r_cot(0));
+        ld.tau_off[0] = static_cast<float>(tau_off(0));
+        ld.tau_off[1] = static_cast<float>(tau_off(1));
 
-      // Thrust-diff torque = total tau_xy - cot-offset tau_xy
-      ld.tau_thrust[0] = static_cast<float>(tau_des(0) - tau_off(0));
-      ld.tau_thrust[1] = static_cast<float>(tau_des(1) - tau_off(1));
+        ld.tau_thrust[0] = static_cast<float>(tau_des(0) - tau_off(0));
+        ld.tau_thrust[1] = static_cast<float>(tau_des(1) - tau_off(1));
+      }
 
       for (int i = 0; i < 4; ++i) {
         ld.tilt_rad[i] = static_cast<float>(tilt_ang_des(i));
         ld.f_thrust[i] = static_cast<float>(thrust_des(i));
       }
-
       ld.f_total = static_cast<float>(gac.f_total);
 
       ld.r_cot[0] = static_cast<float>(s.r_cot(0));
       ld.r_cot[1] = static_cast<float>(s.r_cot(1));
+      ld.r_cot[2] = static_cast<float>(s.r_cot(2));
 
       ld.r_cot_cmd[0] = static_cast<float>(cmd.r_cot(0));
       ld.r_cot_cmd[1] = static_cast<float>(cmd.r_cot(1));
+      ld.r_cot_cmd[2] = static_cast<float>(cmd.r_cot(2));
 
-      ld.solve_ms = l_mpc_output.solve_ms;
-      ld.solve_status = l_mpc_output.state;
+      for (int i = 0; i < 20; ++i) {
+        ld.q_mea[i] = static_cast<float>(s.arm_q[i]);
+        ld.q_d[i]   = static_cast<float>(q_d[i]);
+      }
+
+      // solve
+      ld.solve_ms = static_cast<float>(l_mpc_output.solve_ms);
+      ld.solve_status = static_cast<int32_t>(l_mpc_output.state);
+
+      ld.sbus_used[0] = sbus_frame.ch[0];   // pos_x
+      ld.sbus_used[1] = sbus_frame.ch[1];   // pos_y
+      ld.sbus_used[2] = sbus_frame.ch[2];   // pos_z
+      ld.sbus_used[3] = sbus_frame.ch[3];   // heading/yaw
+      ld.sbus_used[4] = sbus_frame.ch[7];   // mode
+      ld.sbus_used[5] = sbus_frame.ch[8];   // toggle
+      ld.sbus_used[6] = sbus_frame.ch[10];  // L-dial
+      ld.sbus_used[7] = sbus_frame.ch[11];  // R-dial
 
       logger.push(ld);
       if (mmap_logger::log_fp) {
         std::fwrite(&ld, sizeof(ld), 1, mmap_logger::log_fp);
       }
     }
+
 
     // delay for keeping control Hz. May wake up a little early for fresh imu data. [1815030ns]
     const std::chrono::steady_clock::time_point done_tick = std::chrono::steady_clock::now();

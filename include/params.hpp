@@ -14,9 +14,9 @@ static constexpr double kV[3]  = {18.0, 18.0, 17.00};    // Velocity gain [x, y,
 static constexpr double kIX[3] = {15.0, 15.0, 20.0};     // Integral gain [x, y, z]
 
 // ===== Geometry attitude control gain =====
-static constexpr double kR[3]  = {20.0, 20.0,  3.42}; // Rotational gain [roll, pitch, yaw]
-static constexpr double kW[3]  = { 5.5,  5.5,  2.95}; // angular Velocity gain [roll, pitch, yaw]
-static constexpr double kI     = 2.75;  // Integral gain for roll and pitch
+static constexpr double kR[3]  = {50.0, 46.0,  6.5}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kW[3]  = {11.0, 11.0,  3.0}; // angular Velocity gain [roll, pitch, yaw]
+static constexpr double kI     = 0.00;  // Integral gain for roll and pitch -> gaseggi しんで
 static constexpr double kyI    = 1.20;  // Integral gain for yaw
 
 // ===== UAV Parameter =====
@@ -115,7 +115,7 @@ static constexpr const char* CAN_PORT_NAME  = "can0";
 static constexpr const char* MOCAP_TYPE     = "optitrack";
 static constexpr const char* OPTI_IP        = "192.168.10.115";
 static constexpr const char* RIGIDBODY_NAME = "strider";
-static constexpr const char* Log_File_NAME  = "0205_.bin";
+static constexpr const char* Log_File_NAME  = "0207_.bin";
 
 } // namespace param
 

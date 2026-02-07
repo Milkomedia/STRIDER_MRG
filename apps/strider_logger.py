@@ -12,8 +12,8 @@ pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
 
 HEADER_SIZE = 64
-LOGDATA_SIZE = 176
-SLOT_SIZE = 184  # seq(u64)=8 + LogData(176)=184
+LOGDATA_SIZE = 360
+SLOT_SIZE = 368  # seq(u64)=8 + LogData(360)=368
 
 MAGIC = b"STRLOG2\x00"
 VERSION = 2
@@ -106,11 +106,16 @@ class MMapReader:
     f_thrust = np.empty((n, 4), dtype=np.float32)
     f_total = np.empty((n,), dtype=np.float32)
 
-    r_cot = np.empty((n, 2), dtype=np.float32)
-    r_cot_cmd = np.empty((n, 2), dtype=np.float32)
+    r_cot = np.empty((n, 3), dtype=np.float32)
+    r_cot_cmd = np.empty((n, 3), dtype=np.float32)
+
+    q_mea = np.empty((n, 20), dtype=np.float32)
+    q_d = np.empty((n, 20), dtype=np.float32)
 
     solve_ms = np.empty((n,), dtype=np.float32)
     solve_status = np.empty((n,), dtype=np.int32)
+
+    sbus_used = np.empty((n, 8), dtype=np.uint16)
 
     OFF_T            = 0
     OFF_POS_D        = 4
@@ -127,9 +132,12 @@ class MMapReader:
     OFF_F_THRUST     = 132
     OFF_F_TOTAL      = 148
     OFF_R_COT        = 152
-    OFF_R_COT_CMD    = 160
-    OFF_SOLVE_MS     = 168
-    OFF_SOLVE_STATUS = 172
+    OFF_R_COT_CMD    = 164
+    OFF_Q_MEA        = 176
+    OFF_Q_D          = 256
+    OFF_SOLVE_MS     = 336
+    OFF_SOLVE_STATUS = 340
+    OFF_SBUS_USED    = 344
 
     for i in range(n):
       logical = start + i
@@ -166,11 +174,16 @@ class MMapReader:
         f_thrust[i, :] = struct.unpack_from("<ffff", dbuf, OFF_F_THRUST)
         f_total[i]     = struct.unpack_from("<f",    dbuf, OFF_F_TOTAL)[0]
 
-        r_cot[i, :]     = struct.unpack_from("<ff", dbuf, OFF_R_COT)
-        r_cot_cmd[i, :] = struct.unpack_from("<ff", dbuf, OFF_R_COT_CMD)
+        r_cot[i, :]     = struct.unpack_from("<fff", dbuf, OFF_R_COT)
+        r_cot_cmd[i, :] = struct.unpack_from("<fff", dbuf, OFF_R_COT_CMD)
+
+        q_mea[i, :] = struct.unpack_from("<" + "f"*20, dbuf, OFF_Q_MEA)
+        q_d[i, :]   = struct.unpack_from("<" + "f"*20, dbuf, OFF_Q_D)
 
         solve_ms[i]     = struct.unpack_from("<f", dbuf, OFF_SOLVE_MS)[0]
         solve_status[i] = struct.unpack_from("<i", dbuf, OFF_SOLVE_STATUS)[0]
+
+        sbus_used[i, :] = struct.unpack_from("<" + "H"*8, dbuf, OFF_SBUS_USED)
         break
 
     ch = {
@@ -180,7 +193,9 @@ class MMapReader:
       "tau_d": tau_d, "tau_off": tau_off, "tau_thrust": tau_thrust,
       "tilt": tilt, "f_thrust": f_thrust, "f_total": f_total,
       "r_cot": r_cot, "r_cot_cmd": r_cot_cmd,
+      "q_mea": q_mea, "q_d": q_d,
       "solve_ms": solve_ms, "solve_status": solve_status,
+      "sbus_used": sbus_used,
       "write_count": np.int64(wc),
     }
     return t, ch
