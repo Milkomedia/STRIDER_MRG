@@ -12,8 +12,10 @@ pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
 
 HEADER_SIZE = 64
-LOGDATA_SIZE = 176
-SLOT_SIZE = 184  # seq(u64)=8 + LogData(176)=184
+
+# UPDATED (new packed LogData)
+LOGDATA_SIZE = 384
+SLOT_SIZE = 8 + LOGDATA_SIZE  # seq(u64)=8 + LogData(384)=392
 
 MAGIC = b"STRLOG2\x00"
 VERSION = 2
@@ -63,8 +65,11 @@ class MMapReader:
       raise RuntimeError(f"Unsupported version: {self.header.version}")
     if self.header.header_size != HEADER_SIZE:
       raise RuntimeError(f"Header size mismatch: {self.header.header_size}")
+
+    # IMPORTANT: the file header is the source of truth for slot_size.
+    # Still sanity-check against our expected (392).
     if self.header.slot_size != SLOT_SIZE:
-      raise RuntimeError(f"Slot size mismatch: {self.header.slot_size}")
+      raise RuntimeError(f"Slot size mismatch: file={self.header.slot_size}, expected={SLOT_SIZE}")
 
   def close(self) -> None:
     if self.mm is not None:
@@ -92,7 +97,6 @@ class MMapReader:
     pos_d = np.empty((n, 3), dtype=np.float32)
     pos = np.empty((n, 3), dtype=np.float32)
     vel = np.empty((n, 3), dtype=np.float32)
-
     rpy = np.empty((n, 3), dtype=np.float32)
     omega = np.empty((n, 3), dtype=np.float32)
     rpy_raw = np.empty((n, 3), dtype=np.float32)
@@ -106,30 +110,37 @@ class MMapReader:
     f_thrust = np.empty((n, 4), dtype=np.float32)
     f_total = np.empty((n,), dtype=np.float32)
 
-    r_cot = np.empty((n, 2), dtype=np.float32)
-    r_cot_cmd = np.empty((n, 2), dtype=np.float32)
+    # UPDATED: r_cot and cmd are 3
+    r_cot = np.empty((n, 3), dtype=np.float32)
+    r_cot_cmd = np.empty((n, 3), dtype=np.float32)
 
     solve_ms = np.empty((n,), dtype=np.float32)
     solve_status = np.empty((n,), dtype=np.int32)
 
+    # (extra fields exist: vel_raw/omega_raw/sbus/q_mea/q_d, but UI는 일단 동일 유지)
+    # You can add later if needed.
+
+    # ---- OFFSETS for packed struct (must match C++ layout) ----
     OFF_T            = 0
     OFF_POS_D        = 4
     OFF_POS          = 16
     OFF_VEL          = 28
-    OFF_RPY          = 40
-    OFF_OMEGA        = 52
-    OFF_RPY_RAW      = 64
-    OFF_RPY_D        = 76
-    OFF_TAU_D        = 88
-    OFF_TAU_OFF      = 100
-    OFF_TAU_THRUST   = 108
-    OFF_TILT         = 116
-    OFF_F_THRUST     = 132
-    OFF_F_TOTAL      = 148
-    OFF_R_COT        = 152
-    OFF_R_COT_CMD    = 160
-    OFF_SOLVE_MS     = 168
-    OFF_SOLVE_STATUS = 172
+    OFF_VEL_RAW      = 40
+    OFF_RPY          = 52
+    OFF_OMEGA        = 64
+    OFF_OMEGA_RAW    = 76
+    OFF_RPY_RAW      = 88
+    OFF_RPY_D        = 100
+    OFF_TAU_D        = 112
+    OFF_TAU_OFF      = 124
+    OFF_TAU_THRUST   = 132
+    OFF_TILT         = 140
+    OFF_F_THRUST     = 156
+    OFF_F_TOTAL      = 172
+    OFF_R_COT        = 176
+    OFF_R_COT_CMD    = 188
+    OFF_SOLVE_MS     = 376
+    OFF_SOLVE_STATUS = 380
 
     for i in range(n):
       logical = start + i
@@ -166,8 +177,8 @@ class MMapReader:
         f_thrust[i, :] = struct.unpack_from("<ffff", dbuf, OFF_F_THRUST)
         f_total[i]     = struct.unpack_from("<f",    dbuf, OFF_F_TOTAL)[0]
 
-        r_cot[i, :]     = struct.unpack_from("<ff", dbuf, OFF_R_COT)
-        r_cot_cmd[i, :] = struct.unpack_from("<ff", dbuf, OFF_R_COT_CMD)
+        r_cot[i, :]     = struct.unpack_from("<fff", dbuf, OFF_R_COT)
+        r_cot_cmd[i, :] = struct.unpack_from("<fff", dbuf, OFF_R_COT_CMD)
 
         solve_ms[i]     = struct.unpack_from("<f", dbuf, OFF_SOLVE_MS)[0]
         solve_status[i] = struct.unpack_from("<i", dbuf, OFF_SOLVE_STATUS)[0]
@@ -344,18 +355,11 @@ class LoggerWindow(QtWidgets.QMainWindow):
     p4c3 = _mk_plot(3, 2, "f_total [N]", y_range=(0., 80.))
 
     for i in range(4):
-      self._curves[f"F{i+1}"] = p4c1.plot(
-        pen=_mk_pen("solid", width=2, color=rotor_colors[i]),
-        name=f"F{i+1}"
-      )
-      self._curves[f"tilt{i+1}"] = p4c2.plot(
-        pen=_mk_pen("solid", width=2, color=rotor_colors[i]),
-        name=f"tilt{i+1}"
-      )
-
+      self._curves[f"F{i+1}"] = p4c1.plot(pen=_mk_pen("solid", 2, rotor_colors[i]), name=f"F{i+1}")
+      self._curves[f"tilt{i+1}"] = p4c2.plot(pen=_mk_pen("solid", 2, rotor_colors[i]), name=f"tilt{i+1}")
     self._curves["f_total"] = p4c3.plot(pen=pen_act, name="act")
 
-    # Row 5: r_cot / solve_ms / solve_status (restored)
+    # Row 5: r_cot / solve_ms / solve_status
     p5c1 = _mk_plot(4, 0, "r_cot [mm]", y_range=(-50., 50.))
     p5c2 = _mk_plot(4, 1, "solve_ms [ms]", y_range=(0., 10.))
     p5c3 = _mk_plot(4, 2, "solve_status", add_legend=True)
@@ -373,17 +377,18 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._status_plot.getAxis("left").setTicks([[(i, str(i)) for i in range(5)]])
 
     leg = self._status_plot.legend
-    for s in range(5):
-      c = self._status_colors[s]
-      dummy = pg.PlotDataItem(
-        [np.nan], [np.nan],
-        pen=None,
-        symbol="s",
-        symbolSize=10,
-        symbolBrush=pg.mkBrush(*c),
-        symbolPen=pg.mkPen(c[0], c[1], c[2], 255),
-      )
-      leg.addItem(dummy, f"{s}: {self._status_names[s]}")
+    if leg is not None:
+      for s in range(5):
+        c = self._status_colors[s]
+        dummy = pg.PlotDataItem(
+          [np.nan], [np.nan],
+          pen=None,
+          symbol="s",
+          symbolSize=10,
+          symbolBrush=pg.mkBrush(*c),
+          symbolPen=pg.mkPen(c[0], c[1], c[2], 255),
+        )
+        leg.addItem(dummy, f"{s}: {self._status_names[s]}")
 
   @QtCore.pyqtSlot()
   def on_timer(self) -> None:
@@ -459,7 +464,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
         self._curves[f"tilt{i+1}"].setData(tt, tilt_deg[:, i])
       self._curves["f_total"].setData(tt, f_total)
 
-      # Row 5
+      # Row 5 (x,y만 기존대로)
       self._curves["rcot_x_cmd"].setData(tt, r_cot_cmd_mm[:, 0])
       self._curves["rcot_y_cmd"].setData(tt, r_cot_cmd_mm[:, 1])
       self._curves["rcot_x_act"].setData(tt, r_cot_act_mm[:, 0])
@@ -468,23 +473,25 @@ class LoggerWindow(QtWidgets.QMainWindow):
       self._curves["solve_ms"].setData(tt, solve_ms)
 
       # solve_status bars
-      dt = float(np.median(np.diff(tt))) if tt.size >= 2 else 0.01
+      if tt.size >= 2:
+        dt = float(np.median(np.diff(tt)))
+        if not np.isfinite(dt) or dt <= 0:
+          dt = 0.01
+      else:
+        dt = 0.01
+
       x = tt
       y = solve_status
 
       for s in range(5):
         mask = (y == s)
-        xs = x[mask]
-        y0 = -1.0
+        xs = x[mask].astype(np.float64)
         heights = np.full(xs.shape, float(s + 1), dtype=np.float32)
-        width = dt if s == 0 else 6.0 * dt
+        width = float(6.0 * dt)
 
         if s not in self._status_bars:
           bar = pg.BarGraphItem(
-            x=xs,
-            y0=y0,
-            height=heights,
-            width=width,
+            x=xs, y0=-1.0, height=heights, width=width,
             brush=pg.mkBrush(*self._status_colors[s]),
             pen=None,
           )
@@ -492,10 +499,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
           self._status_bars[s] = bar
         else:
           self._status_bars[s].setOpts(
-            x=xs,
-            y0=y0,
-            height=heights,
-            width=width,
+            x=xs, y0=-1.0, height=heights, width=width,
             brush=pg.mkBrush(*self._status_colors[s]),
             pen=None,
           )

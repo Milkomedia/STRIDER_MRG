@@ -3,11 +3,15 @@
 
 #include <atomic>
 #include <cstdint>
+#include "utils.hpp"
 
 struct OptiFrame {
-  uint64_t host_time_ns = 0;             // Host timestamp (steady_clock)
-  double pos[3]  = {0.0, 0.0, 0.0};      // [m]
-  double quat[4] = {0.0, 0.0, 0.0, 1.0}; // [x y z w]
+  uint64_t host_time_ns = 0;              // Host timestamp (steady_clock)
+  double pos[3]  = {0.0, 0.0, 0.0};       // [m]
+  double quat[4] = {0.0, 0.0, 0.0, 1.0};  // [x y z w]
+  double vel_raw[3]  = {0.0, 0.0, 0.0};   // [m/s] 
+  double vel[3] = {0.0, 0.0, 0.0};        // [m/s] 
+  double acc[3]      = {0.0, 0.0, 0.0};   // [m/s^2]
 };
 
 namespace libmotioncapture {
@@ -57,6 +61,11 @@ private:
   std::atomic<uint64_t> last_host_ns_{0}; // "Good" update time (target rigid body found) for stale detection.
 
   libmotioncapture::MotionCapture* mc_ = nullptr;
+
+  Butter vel_bf_[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
+  uint64_t prev_ns_ = 0;
+  double   prev_pos_[3]      = {0.0, 0.0, 0.0};
+  double   prev_vel_[3] = {0.0, 0.0, 0.0};
 
   // If the target rigid body is not found for this long, kill.
   static constexpr uint64_t FirstTimeoutNs = 2 * 1e9;

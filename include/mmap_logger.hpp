@@ -19,32 +19,42 @@ namespace mmap_logger {
 // -----------------------------
 #pragma pack(push, 1)
 struct LogData {
-  float t              =  0.0f;  // timestamp [sec]
-  float pos_d[3]       = {0.0f}; // desired position [m]
-  float pos[3]         = {0.0f}; // current position [m]
-  float vel[3]         = {0.0f}; // opti velocity [m/s]
-  float rpy[3]         = {0.0f}; // current attitude [rad]
-  float omega[3]       = {0.0f}; // imu angular rate [rad/s]
-  float rpy_raw[3]     = {0.0f}; // desired attitude from position ctrl [rad]
-  float rpy_d[3]       = {0.0f}; // desired attitude reconstructed (R_d) [rad]
-  float tau_d[3]       = {0.0f}; // desired torque (att ctrl) [N.m]
-  float tau_off[2]     = {0.0f}; // cot-offset torque [N.m] (x,y)
-  float tau_thrust[2]  = {0.0f}; // thrust-diff torque [N.m] (x,y)
-  float tilt_rad[4]    = {0.0f}; // per-rotor tilt command [rad]
-  float f_thrust[4]    = {0.0f}; // per-rotor thrust command [N]
-  float f_total        =  0.0f;  // desired collective thrust [N]
-  float r_cot[2]       = {0.0f}; // current CoT position [m] (x,y)
-  float r_cot_cmd[2]   = {0.0f}; // optimal CoT command [m] (x,y)
-  float solve_ms       =  0.0f;  // acados solve time [ms]
-  int32_t solve_status = -1;     // solver status (https://docs.acados.org/python_interface/index.html#acados_template.acados_ocp_options.AcadosOcpOptions.qp_solver)
+  float t              = 0.0f;     // timestamp [sec]
+  float pos_d[3]       = {0.0f};   // desired position [m]
+  float pos[3]         = {0.0f};   // current position [m]
+  float vel[3]         = {0.0f};   // opti velocity (filtered) [m/s]
+  float vel_raw[3]     = {0.0f};   // opti velocity (raw) [m/s]
+  float rpy[3]         = {0.0f};   // current attitude [rad]
+  float omega[3]       = {0.0f};   // imu angular rate (filtered) [rad/s]
+  float omega_raw[3]   = {0.0f};   // imu angular rate (raw) [rad/s]
+  float rpy_raw[3]     = {0.0f};   // desired attitude from position ctrl [rad]
+  float rpy_d[3]       = {0.0f};   // desired attitude reconstructed (R_d) [rad]
+  float tau_d[3]       = {0.0f};   // desired torque (att ctrl) [N.m]
+  float tau_off[2]     = {0.0f};   // cot-offset torque [N.m] (x,y)
+  float tau_thrust[2]  = {0.0f};   // thrust-diff torque [N.m] (x,y)
+  float tilt_rad[4]    = {0.0f};   // per-rotor tilt command [rad]
+  float f_thrust[4]    = {0.0f};   // per-rotor thrust command [N]
+  float f_total        = 0.0f;     // desired collective thrust [N]
+  float r_cot[3]       = {0.0f};   // current CoT position [m] (x,y,z)
+  float r_cot_cmd[3]   = {0.0f};   // optimal CoT command [m] (x,y,z_cmd)
+
+  // idx0: ch0  x | idx1: ch1  y | idx2: ch2 z | idx3: ch3  heading
+  // idx4: ch7  flight mode switch | idx5: ch8  arm/idle/rising toggle
+  // idx6: ch10 L-dial | idx7: ch11 R-dial
+  uint16_t sbus_used[8] = {0};
+
+  float q_mea[20]      = {0.0f};   // joint read [rad]
+  float q_d[20]        = {0.0f};   // joint desired [rad]
+  float solve_ms       = 0.0f;     // acados solve time [ms]
+  int32_t solve_status = -1;       // solver status
 };
 #pragma pack(pop)
 
 // .bin File 
 static FILE* log_fp = nullptr;
 
-// 176 bytes with the layout above
-static_assert(sizeof(LogData) == 176, "LogData size changed. Update Python reader offsets.");
+// 400 bytes with the layout above
+static_assert(sizeof(LogData) == 384, "LogData size changed. Update Python reader offsets.");
 
 // -----------------------------
 // MMap header + ring buffer slot
@@ -72,7 +82,7 @@ struct alignas(8) Slot {
 };
 
 static_assert(alignof(Slot) == 8, "Slot alignment must be 8.");
-static_assert(sizeof(Slot) == 184, "Slot size must be 184 bytes.");
+static_assert(sizeof(Slot) == 392, "Slot size must be 392 bytes.");
 
 static constexpr uint32_t k_Sec = 10;
 static constexpr uint32_t k_Cap = static_cast<uint32_t>(1.0 / std::chrono::duration<double>(param::CTRL_DT).count()) * k_Sec;
