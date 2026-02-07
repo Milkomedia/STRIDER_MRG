@@ -2,6 +2,7 @@
 #define T265_H
 
 #include "params.hpp"
+#include "utils.hpp" 
 
 #include <atomic>
 #include <cstdint>
@@ -19,6 +20,7 @@ struct T265frame {
   double vel[3]  = {0.0, 0.0, 0.0};      // [m/s]
   double quat[4] = {0.0, 0.0, 0.0, 1.0}; // [x y z w]
   double omega[3]= {0.0, 0.0, 0.0};      // [rad/s]
+  double omega_raw[3]= {0.0, 0.0, 0.0};      // [rad/s]
 
   uint8_t tracker_conf = 0; // 1,2,3 -> LOW,MEDIUM,HIGH
   uint8_t mapper_conf  = 0; // 1,2,3 -> LOW,MEDIUM,HIGH
@@ -64,6 +66,7 @@ private:
   // Seqlock buffer
   mutable std::atomic<uint64_t> seq_{0};
   T265frame buf_{};
+  Butter gyro_bf_[3] = {Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_Z_CUTOFF_HZ), Butter(param::GYRO_XY_CUTOFF_HZ),};
 
   // Lifecycle
   std::atomic<bool> stop_request_{false};

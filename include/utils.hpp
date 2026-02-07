@@ -459,6 +459,81 @@ static inline double sbus_coty_map(const uint16_t ch11) {
   return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch11 - 352) * coty_factor_;
 }
 
+
+
+
+// --- 시정수 디버깅
+static inline std::pair<double,double> sbus_rcot_xy_oneshot(const uint16_t ch10) {
+  static constexpr double A = 0.047;              // x is always ±A
+  static constexpr uint16_t THRESH_RESET = 500;   // reset only below this
+  static constexpr uint16_t THRESH_1 = 800;
+  static constexpr uint16_t THRESH_2 = 1100;
+  static constexpr uint16_t THRESH_3 = 1400;
+  static constexpr double PULSE_SEC = 6.0;
+
+  static constexpr double TAN15 = 0.2679491924311227;  // tan(15°)
+  static constexpr double TAN30 = 0.5773502691896257;  // tan(30°)
+
+  enum class Mode : uint8_t { NONE=0, DEG0=1, DEG15=2, DEG30=3, DEG45=4 };
+
+  static bool prev_high = false;   // latched ">=500 since last reset"
+  static bool active = false;      // oneshot running
+  static Mode mode = Mode::NONE;   // latched scenario
+  static std::chrono::steady_clock::time_point t0;
+
+  const bool high = (ch10 >= THRESH_RESET);
+
+  // reset only when ch10 < 500
+  if (!high) {
+    prev_high = false;
+    active = false;
+    mode = Mode::NONE;
+    return {0.0, 0.0};
+  }
+
+  // start oneshot only on rising edge over 500; latch scenario by current ch10
+  if (high && !prev_high) {
+    active = true;
+    t0 = std::chrono::steady_clock::now();
+
+    if (ch10 >= THRESH_3)      mode = Mode::DEG45; // >=1400
+    else if (ch10 >= THRESH_2) mode = Mode::DEG30; // [1100,1400)
+    else if (ch10 >= THRESH_1) mode = Mode::DEG15; // [800,1100)
+    else                       mode = Mode::DEG0;  // [500,800)
+  }
+  prev_high = true;
+
+  if (!active) return {0.0, 0.0};
+
+  const auto now = std::chrono::steady_clock::now();
+  const double dt = std::chrono::duration<double>(now - t0).count();
+
+  if (dt >= PULSE_SEC) {
+    active = false;
+    return {0.0, 0.0};
+  }
+
+  // MIN then MAX
+  const double sgn = (dt < 0.5 * PULSE_SEC) ? -1.0 : +1.0;
+
+  // x always ±A
+  const double x = sgn * A;
+  double y_amp = 0.0;
+  switch (mode) {
+    case Mode::DEG0:  y_amp = 0.0;        break;       // y=0
+    case Mode::DEG15: y_amp = A * TAN15;  break;       // y=x*tan15
+    case Mode::DEG30: y_amp = A * TAN30;  break;       // y=x*tan30
+    case Mode::DEG45: y_amp = A;          break;       // y=x
+    default:          return {0.0, 0.0};
+  }
+
+  const double y = sgn * y_amp;
+  return {x, y};
+}
+
+
+
+
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.
 static inline void try_set_prior(int prio) {

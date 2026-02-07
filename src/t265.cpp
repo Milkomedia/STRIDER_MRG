@@ -8,6 +8,7 @@
 #include <immintrin.h> // _mm_pause
 #include <pthread.h>
 #include <sched.h>
+#include <chrono> 
 
 // Stop only; caller must join the owning std::thread before destroying this object.
 T265::~T265() {
@@ -86,6 +87,7 @@ void T265::on_frame_(const rs2::frame& f) noexcept {
     T265frame s;
     s.host_time_ns   = host_ns;
     s.device_time_ms = device_ms;
+    const auto now_tp = std::chrono::steady_clock::now(); 
 
     s.pos[0] = static_cast<double>(p.translation.x);
     s.pos[1] = static_cast<double>(p.translation.y);
@@ -100,9 +102,18 @@ void T265::on_frame_(const rs2::frame& f) noexcept {
     s.quat[2] = static_cast<double>(p.rotation.z);
     s.quat[3] = static_cast<double>(p.rotation.w);
 
-    s.omega[0] = static_cast<double>(p.angular_velocity.x);
-    s.omega[1] = static_cast<double>(p.angular_velocity.y);
-    s.omega[2] = static_cast<double>(p.angular_velocity.z);
+    const double wx_raw = static_cast<double>(p.angular_velocity.x);
+    const double wy_raw = static_cast<double>(p.angular_velocity.y);
+    const double wz_raw = static_cast<double>(p.angular_velocity.z);
+    s.omega_raw[0] = wx_raw;
+    s.omega_raw[1] = wy_raw;
+    s.omega_raw[2] = wz_raw;
+
+    // s.omega[0] = gyro_bf_[0].update(wx_raw, now_tp);
+    // s.omega[1] = gyro_bf_[1].update(wy_raw, now_tp);
+    s.omega[0] = wx_raw;
+    s.omega[1] = gyro_bf_[1].update(wy_raw, now_tp);
+    s.omega[2] = wz_raw;
 
     s.tracker_conf = static_cast<uint8_t>(p.tracker_confidence);
     s.mapper_conf  = static_cast<uint8_t>(p.mapper_confidence);
@@ -180,6 +191,7 @@ bool T265::start_stream_() {
   // Reset monitoring state
   last_host_ns_.store(0, std::memory_order_relaxed);
   last_device_ms_.store(0, std::memory_order_relaxed);
+  gyro_bf_[0].reset(); gyro_bf_[1].reset(); gyro_bf_[2].reset();
 
   try {
     rs2::pipeline_profile prof = pipe_.start(cfg, [this](const rs2::frame& f) { on_frame_(f); });

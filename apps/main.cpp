@@ -122,10 +122,6 @@ int main() {
   fdcl::command_t* gac_cmd_ptr   = &gac_cmd;
   fdcl::control gac(gac_state_ptr, gac_cmd_ptr);
 
-  // --- sensor measurement filters ---
-  Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
-  Butter gyro_bf[3] = {Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_Z_CUTOFF_HZ)};
-
   // --- other parameters ---
   Phase   phase = Phase::READY;
   State   s{};
@@ -188,9 +184,7 @@ int main() {
     if (cur_t265_cnt > last_t265_cnt) {
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
-
-        // gyro frame transformation
-        s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_bf[2].update(-t265_frame.omega[1], now);
+        s.omega(0) = -t265_frame.omega[2]; s.omega(1) = t265_frame.omega[0]; s.omega(2) = -t265_frame.omega[1];
 
         last_t265_cnt = cur_t265_cnt;
       }
@@ -199,18 +193,11 @@ int main() {
     // MOCAP read [635ns]
     const uint64_t cur_opti_cnt = opti.get_frame_count();
     if (cur_opti_cnt > last_opti_cnt) {
-      const uint64_t prev_time_ns = opti_frame.host_time_ns;
-      const Eigen::Vector3d prev_pos = s.pos;
-      const Eigen::Vector3d prev_vel = s.vel;
       if (opti.read_latest(opti_frame)) {
         // apply frame transformation (opti uses z-up convention)
-        s.pos(0)=opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2)=-opti_frame.pos[2];
-
-        const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
-        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), now);
-
-        s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
-
+        s.pos(0)= opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2) = -opti_frame.pos[2];
+        s.vel(0)=                      opti_frame.vel[0];                    s.vel(1)=  -opti_frame.vel[1]; s.vel(2) = -opti_frame.vel[2];
+        s.acc(0) =                     opti_frame.acc[0];                    s.acc(1) = -opti_frame.acc[1]; s.acc(2) = -opti_frame.acc[2];
         last_opti_cnt = cur_opti_cnt;
       }
     }
@@ -221,10 +208,22 @@ int main() {
       if (sbus.read_latest(sbus_frame)) {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
-        cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+        // cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+        // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+
+        // --- 매뉴얼 r_cot
         // cmd.r_cot(0) = sbus_rcotx_map(sbus_frame.ch[10]);
         // cmd.r_cot(1) = sbus_rcoty_map(sbus_frame.ch[11]);
+
+
+
+        // --- 시정수 디버깅용 ---
+        const auto [x, y] = sbus_rcot_xy_oneshot(sbus_frame.ch[10]);
+        cmd.r_cot(0) = x;
+        cmd.r_cot(1) = y;
+        // --- 시정수 디버깅용 ---
+
+
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -429,7 +428,7 @@ int main() {
     // --- Dynamixel write [355ns] ---
     if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
-    // ------ [Data logging] [6984ns] -----------------------------------------------------------------------------
+    // ------ [Data logging] -----------------------------------------------------------------------------
     {
       mmap_logger::LogData ld{};
 
@@ -443,19 +442,24 @@ int main() {
       ld.pos[1] = static_cast<float>(s.pos(1));
       ld.pos[2] = static_cast<float>(s.pos(2));
 
-
-      ld.vel[0] = static_cast<float>(s.vel(0));
-      ld.vel[1] = static_cast<float>(s.vel(1));
-      ld.vel[2] = static_cast<float>(s.vel(2));
+      // vel: filtered / raw
+      ld.vel[0]     = static_cast<float>(s.vel(0));
+      ld.vel[1]     = static_cast<float>(s.vel(1));
+      ld.vel[2]     = static_cast<float>(s.vel(2));
+      ld.vel_raw[0] = static_cast<float>(opti_frame.vel_raw[0]);
+      ld.vel_raw[1] = static_cast<float>(-opti_frame.vel_raw[1]);
+      ld.vel_raw[2] = static_cast<float>(-opti_frame.vel_raw[2]);
 
       ld.rpy[0] = static_cast<float>(euler_rpy(0));
       ld.rpy[1] = static_cast<float>(euler_rpy(1));
       ld.rpy[2] = static_cast<float>(euler_rpy(2));
 
-      ld.omega[0] = static_cast<float>(s.omega(0));
-      ld.omega[1] = static_cast<float>(s.omega(1));
-      ld.omega[2] = static_cast<float>(s.omega(2));
-
+      ld.omega[0]     = static_cast<float>(s.omega(0));
+      ld.omega[1]     = static_cast<float>(s.omega(1));
+      ld.omega[2]     = static_cast<float>(s.omega(2));
+      ld.omega_raw[0] = static_cast<float>(-t265_frame.omega_raw[2]);
+      ld.omega_raw[1] = static_cast<float>(t265_frame.omega_raw[0]);
+      ld.omega_raw[2] = static_cast<float>(-t265_frame.omega_raw[1]);
       {
         const Eigen::Vector3d rpy_raw = R_to_rpy(R_raw);
         ld.rpy_raw[0] = static_cast<float>(rpy_raw(0));
@@ -473,13 +477,11 @@ int main() {
       ld.tau_d[1] = static_cast<float>(tau_des(1));
       ld.tau_d[2] = static_cast<float>(tau_des(2));
 
-      // CoT-offset torque around x,y
       const double f_total = gac.f_total;
       const Eigen::Vector2d tau_off(-f_total * s.r_cot(1), f_total * s.r_cot(0));
       ld.tau_off[0] = static_cast<float>(tau_off(0));
       ld.tau_off[1] = static_cast<float>(tau_off(1));
 
-      // Thrust-diff torque = total tau_xy - cot-offset tau_xy
       ld.tau_thrust[0] = static_cast<float>(tau_des(0) - tau_off(0));
       ld.tau_thrust[1] = static_cast<float>(tau_des(1) - tau_off(1));
 
@@ -487,16 +489,33 @@ int main() {
         ld.tilt_rad[i] = static_cast<float>(tilt_ang_des(i));
         ld.f_thrust[i] = static_cast<float>(thrust_des(i));
       }
-
       ld.f_total = static_cast<float>(gac.f_total);
 
+      // r_cot read/cmd (xyz)
       ld.r_cot[0] = static_cast<float>(s.r_cot(0));
       ld.r_cot[1] = static_cast<float>(s.r_cot(1));
+      ld.r_cot[2] = static_cast<float>(s.r_cot(2));
 
       ld.r_cot_cmd[0] = static_cast<float>(cmd.r_cot(0));
       ld.r_cot_cmd[1] = static_cast<float>(cmd.r_cot(1));
+      ld.r_cot_cmd[2] = static_cast<float>(cmd.r_cot(2));
 
-      ld.solve_ms = l_mpc_output.solve_ms;
+      ld.sbus_used[0] = sbus_frame.ch[0];   // pos_x
+      ld.sbus_used[1] = sbus_frame.ch[1];   // pos_y
+      ld.sbus_used[2] = sbus_frame.ch[2];   // pos_z
+      ld.sbus_used[3] = sbus_frame.ch[3];   // heading/yaw
+      ld.sbus_used[4] = sbus_frame.ch[7];   // mode
+      ld.sbus_used[5] = sbus_frame.ch[8];   // toggle
+      ld.sbus_used[6] = sbus_frame.ch[10];  // L-dial
+      ld.sbus_used[7] = sbus_frame.ch[11];  // R-dial
+
+      // joints: read vs desired
+      for (int i = 0; i < 20; ++i) {
+        ld.q_mea[i] = static_cast<float>(s.arm_q[i]);
+        ld.q_d[i]   = static_cast<float>(q_d[i]);
+      }
+
+      ld.solve_ms     = l_mpc_output.solve_ms;
       ld.solve_status = l_mpc_output.state;
 
       logger.push(ld);
@@ -525,8 +544,8 @@ int main() {
   dxl.request_stop();
 
   if (mmap_logger::log_fp) {
-  fclose(mmap_logger::log_fp);
-  mmap_logger::log_fp = nullptr;
+    fclose(mmap_logger::log_fp);
+    mmap_logger::log_fp = nullptr;
   }
 
   if (th_t265.joinable()) th_t265.join();

@@ -124,6 +124,7 @@ void Opti::run() {
       mc_->waitForNextFrame();
 
       const uint64_t host_ns = now_steady_ns();
+      const auto now_tp = std::chrono::steady_clock::now();
 
       const auto& rbs = mc_->rigidBodies();
       bool found = false;
@@ -138,6 +139,35 @@ void Opti::run() {
 
         const auto p = rb.position();
         const auto q = rb.rotation();
+        
+        const double px = static_cast<double>(p.x());
+        const double py = static_cast<double>(p.y());
+        const double pz = static_cast<double>(p.z());
+        
+        const uint64_t prev_host_ns = prev_ns_;
+
+        Eigen::Vector3d v_raw = Eigen::Vector3d::Zero();
+        {
+          const Eigen::Vector3d p(px, py, pz);
+          const Eigen::Vector3d p_prev(prev_pos_[0], prev_pos_[1], prev_pos_[2]);
+          v_raw = diff(p, p_prev, host_ns, prev_ns_);
+        }
+
+        const double vx_f = vel_bf_[0].update(v_raw(0), now_tp);
+        const double vy_f = vel_bf_[1].update(v_raw(1), now_tp);
+        const double vz_f = vel_bf_[2].update(v_raw(2), now_tp);
+
+        Eigen::Vector3d a = Eigen::Vector3d::Zero();
+        {
+          const Eigen::Vector3d v_cur(vx_f, vy_f, vz_f);
+          const Eigen::Vector3d v_prev(prev_vel_[0], prev_vel_[1], prev_vel_[2]);
+          a = diff(v_cur, v_prev, host_ns, prev_ns_);
+        }
+        
+        prev_ns_ = host_ns;
+        prev_pos_[0] = px; prev_pos_[1] = py; prev_pos_[2] = pz;
+        if (prev_host_ns == 0) { prev_vel_[0] = 0.0; prev_vel_[1] = 0.0; prev_vel_[2] = 0.0; }
+        else { prev_vel_[0] = vx_f; prev_vel_[1] = vy_f; prev_vel_[2] = vz_f; }
 
         {
           SeqWriteGuard g(seq_);
@@ -149,6 +179,15 @@ void Opti::run() {
           buf_.quat[1] = static_cast<double>(q.y());
           buf_.quat[2] = static_cast<double>(q.z());
           buf_.quat[3] = static_cast<double>(q.w());
+          buf_.vel_raw[0]  = v_raw(0);
+          buf_.vel_raw[1]  = v_raw(1);
+          buf_.vel_raw[2]  = v_raw(2);
+          buf_.vel[0] = vx_f;
+          buf_.vel[1] = vy_f;
+          buf_.vel[2] = vz_f;
+          buf_.acc[0] = a(0); 
+          buf_.acc[1] = a(1); 
+          buf_.acc[2] = a(2);
         }
 
         frame_count_.fetch_add(1, std::memory_order_relaxed);

@@ -115,7 +115,7 @@ static constexpr const char* CAN_PORT_NAME  = "can0";
 static constexpr const char* MOCAP_TYPE     = "optitrack";
 static constexpr const char* OPTI_IP        = "192.168.10.115";
 static constexpr const char* RIGIDBODY_NAME = "strider";
-static constexpr const char* Log_File_NAME  = "0205_.bin";
+static constexpr const char* Log_File_NAME  = "0207_.bin";
 
 } // namespace param
 
