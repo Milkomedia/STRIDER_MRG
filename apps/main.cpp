@@ -223,8 +223,6 @@ int main() {
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
         cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
         cmd.l        = sbus_l_map(sbus_frame.ch[11]);
-        // cmd.r_cot(0) = sbus_rcotx_map(sbus_frame.ch[10]);
-        // cmd.r_cot(1) = sbus_rcoty_map(sbus_frame.ch[11]);
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -282,6 +280,7 @@ int main() {
       if (dxl.read_latest(dxl_frame)) {
         for(uint8_t i = 0; i < 20; ++i) {s.arm_q[i] = dxl_frame.q_mea[i];}
         s.r_cot = FK(s.arm_q);
+        s.r_com = 0.523 * s.r_cot; 
         last_dxl_cnt = cur_dxl_cnt;
       }
     }
@@ -384,7 +383,7 @@ int main() {
     // ==== CONTORL ALLOCATION [207279ns] ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (f_1234 > 0)
     Eigen::Vector4d tilt_ang_des = Eigen::Vector4d::Zero();
-    Sequential_Allocation(F_des, tau_des, cmd.tauz_bar, s.arm_q, thrust_des, tilt_ang_des);
+    Sequential_Allocation(F_des, tau_des, cmd.tauz_bar, s.arm_q, s.r_com, thrust_des, tilt_ang_des);
 
     // --- resolve r_cot_cmd to q_d [78216ns] ---
     double q_d[20] = {0};

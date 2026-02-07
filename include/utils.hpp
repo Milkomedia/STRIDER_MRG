@@ -24,6 +24,7 @@ struct State {
   Eigen::Vector3d omega = Eigen::Vector3d::Zero();     // current angular velocity [rad/s] (T265)
   Eigen::Vector3d r_cot = Eigen::Vector3d::Zero();     // current b_p_Cot position [m] (Dynamixel)
   double arm_q[20] = {0.0};                            // current joint angle [rad] (Dynamixel)
+  Eigen::Vector3d r_com = 0.523*r_cot;                 // current estimated CoM position [m] 
 };
 
 struct Command {
@@ -34,7 +35,7 @@ struct Command {
   double l   = 0.48;                                    // desired inter-rotor distance [m]
   Eigen::Matrix3d R_cot = Eigen::Matrix3d::Identity();  // desired CoT-body tilt cmd [SO3] (not updated)
   // This can only be changed by Control Allocation
-  double tauz_bar  = 0.0;                              // current yaw thrust torque [N.m] (Sequential control allocation)
+  double tauz_bar  = 0.0;                               // current yaw thrust torque [N.m] (Sequential control allocation)
   // These can only be changed by MRG
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
   Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.24);   // desired CoT position [m], z-element can be manually changable by SBUS
@@ -331,7 +332,10 @@ static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, doubl
 }
 
 // --------- [ Control Allocation ] ---------
-static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Vector3d& tau_d, double& tauz_bar, const double arm_q[20], Eigen::Vector4d& C1_des, Eigen::Vector4d& C2_des) {
+static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Vector3d& tau_d, double& tauz_bar, const double arm_q[20], const Eigen::Vector3d& Pc, Eigen::Vector4d& C1_des, Eigen::Vector4d& C2_des) {
+
+  double pcx = Pc(0); double pcy = Pc(1); double pcz = 0.0;
+  
   // yaw wrench conversion
   tauz_bar = param::SERVO_DELAY_ALPHA*tau_d(2) + param::SERVO_DELAY_BETA*tauz_bar;
   double tauz_r = tau_d(2) - tauz_bar;
@@ -356,14 +360,14 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
 
   // thrust allocation
   Eigen::Matrix4d A1;
-  A1(0,0) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 0)) * s1 - r_mea(1, 0) * c1;
-  A1(0,1) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 1)) * s2 - r_mea(1, 1) * c2;
-  A1(0,2) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 2)) * s3 - r_mea(1, 2) * c3;
-  A1(0,3) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 3)) * s4 - r_mea(1, 3) * c4;
-  A1(1,0) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 0)) * s1 + r_mea(0, 0) * c1;
-  A1(1,1) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 1)) * s2 + r_mea(0, 1) * c2;
-  A1(1,2) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 2)) * s3 + r_mea(0, 2) * c3;
-  A1(1,3) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 3)) * s4 + r_mea(0, 3) * c4;
+  A1(0,0) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 0) - pcz) * s1 + (pcy - r_mea(1, 0)) * c1;
+  A1(0,1) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 1) + pcz) * s2 + (pcy - r_mea(1, 1)) * c2;
+  A1(0,2) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 2) + pcz) * s3 + (pcy - r_mea(1, 2)) * c3;
+  A1(0,3) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 3) - pcz) * s4 + (pcy - r_mea(1, 3)) * c4;
+  A1(1,0) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 0) + pcz) * s1 + (r_mea(0, 0) - pcx) * c1;
+  A1(1,1) = -inv_sqrt2 * (-param::PWM_ZETA - r_mea(2, 1) + pcz) * s2 + (r_mea(0, 1) - pcx) * c2;
+  A1(1,2) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 2) - pcz) * s3 + (r_mea(0, 2) - pcx) * c3;
+  A1(1,3) = -inv_sqrt2 * ( param::PWM_ZETA + r_mea(2, 3) - pcz) * s4 + (r_mea(0, 3) - pcx) * c4;
   A1(2,0) = -param::PWM_ZETA * c1;
   A1(2,1) =  param::PWM_ZETA * c2;
   A1(2,2) = -param::PWM_ZETA * c3;
@@ -390,10 +394,10 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
   A2(1,1) = -inv_sqrt2 * C1_des(1);
   A2(1,2) = -inv_sqrt2 * C1_des(2);
   A2(1,3) =  inv_sqrt2 * C1_des(3);
-  A2(2,0) = inv_sqrt2 * ( r_mea(0, 0) - r_mea(1, 0)) * C1_des(0);
-  A2(2,1) = inv_sqrt2 * (-r_mea(0, 1) - r_mea(1, 1)) * C1_des(1);
-  A2(2,2) = inv_sqrt2 * (-r_mea(0, 2) + r_mea(1, 2)) * C1_des(2);
-  A2(2,3) = inv_sqrt2 * ( r_mea(0, 3) + r_mea(1, 3)) * C1_des(3);
+  A2(2,0) = inv_sqrt2 * (-pcx + pcy + r_mea(0, 0) - r_mea(1, 0)) * C1_des(0);
+  A2(2,1) = inv_sqrt2 * ( pcx + pcy - r_mea(0, 1) - r_mea(1, 1)) * C1_des(1);
+  A2(2,2) = inv_sqrt2 * ( pcx - pcy - r_mea(0, 2) + r_mea(1, 2)) * C1_des(2);
+  A2(2,3) = inv_sqrt2 * (-pcx - pcy + r_mea(0, 3) + r_mea(1, 3)) * C1_des(3);
   A2(3,0) = inv_sqrt2 * ( r_mea(0, 0) - r_mea(1, 0)) * C1_des(0);
   A2(3,1) = inv_sqrt2 * ( r_mea(0, 1) + r_mea(1, 1)) * C1_des(1);
   A2(3,2) = inv_sqrt2 * (-r_mea(0, 2) + r_mea(1, 2)) * C1_des(2);
@@ -449,15 +453,6 @@ static inline double sbus_l_map(const uint16_t ch11) {
   return param::SBUS_L_RANGE[0] + static_cast<double>(ch11 - 352) * l_factor_;
 }
 
-static inline double sbus_cotx_map(const uint16_t ch10) {
-  static constexpr double cotx_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1344.0;
-  return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch10 - 352) * cotx_factor_;
-}
-
-static inline double sbus_coty_map(const uint16_t ch11) {
-  static constexpr double coty_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1344.0;
-  return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch11 - 352) * coty_factor_;
-}
 
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.

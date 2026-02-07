@@ -54,9 +54,9 @@ static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Z_RANGE       = 1.0;   // [m] k mapped to [ 0, -k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
-static constexpr double SBUS_L_RANGE[2]    = { 0.41,  0.55};  // [m]
-static constexpr double SBUS_COTZ_RANGE[2] = {-0.23, -0.25};  // [m]
-static constexpr double SBUS_COTXY_RANGE[2] = {-0.47, 0.47};  // [m]
+static constexpr double SBUS_L_RANGE[2]    = { 0.46, 0.50};     // [m]
+static constexpr double SBUS_COTZ_RANGE[2] = {-0.21, -0.27};    // [m]
+static constexpr double SBUS_COTXY_RANGE[2] = {-0.047, 0.047};  // [m]
 
 // ===== MPC parameters  =====
 constexpr std::size_t N_STEPS  = 60;   // Steps per horizen
