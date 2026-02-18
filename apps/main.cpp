@@ -183,7 +183,7 @@ int main() {
     // measure loop-start tick
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    // IMU read [4117ns]
+    // IMU read
     const uint64_t cur_t265_cnt = t265.get_frame_count();
     if (cur_t265_cnt > last_t265_cnt) {
       if (t265.read_latest(t265_frame)) {
@@ -196,7 +196,7 @@ int main() {
       }
     }
 
-    // MOCAP read [635ns]
+    // MOCAP read
     const uint64_t cur_opti_cnt = opti.get_frame_count();
     if (cur_opti_cnt > last_opti_cnt) {
       const uint64_t prev_time_ns = opti_frame.host_time_ns;
@@ -215,7 +215,7 @@ int main() {
       }
     }
 
-    // SBUS read [2904ns]
+    // SBUS read
     const uint64_t cur_sbus_cnt = sbus.get_frame_count();
     if (cur_sbus_cnt > last_sbus_cnt) {
       if (sbus.read_latest(sbus_frame)) {
@@ -274,7 +274,7 @@ int main() {
       }
     }
 
-    // Dynamixel read [89549ns]
+    // Dynamixel read
     const uint64_t cur_dxl_cnt = dxl.get_frame_count();
     if (cur_dxl_cnt > last_dxl_cnt) {
       if (dxl.read_latest(dxl_frame)) {
@@ -285,7 +285,7 @@ int main() {
       }
     }
 
-    // ==== POSITION CONTROL [244664ns] ====
+    // ==== POSITION CONTROL ====
     gac_cmd.xd  = cmd.pos;
     gac_cmd.b1d = cmd.heading;
     gac_state.x = s.pos;
@@ -297,7 +297,7 @@ int main() {
     const Eigen::Matrix3d R_raw = gac_cmd.Rd;
     const double F_des = -gac.f_total; // (f_total > 0)
     
-    // ==== MRG CALC [6451ns]====
+    // ==== MRG CALC ====
     const Eigen::Vector3d euler_rpy = R_to_rpy(s.R);
     { // MPC send
       std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
@@ -376,27 +376,27 @@ int main() {
       else {next_mpc_tick = l_mpc_output.t + param::MPC_DT;}
     }
 
-    // ==== ATTITUDE CONTROL [133907ns] ====
+    // ==== ATTITUDE CONTROL ====
     const Eigen::Matrix3d R_d = R_raw * expm_hat(cmd.d_theta);
     Eigen::Vector3d tau_des = gac.attitude_control(R_d);
     
-    // ==== CONTORL ALLOCATION [207279ns] ====
+    // ==== CONTORL ALLOCATION ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (f_1234 > 0)
     Eigen::Vector4d tilt_ang_des = Eigen::Vector4d::Zero();
     Sequential_Allocation(F_des, tau_des, cmd.tauz_bar, s.arm_q, s.r_com, thrust_des, tilt_ang_des);
 
-    // --- resolve r_cot_cmd to q_d [78216ns] ---
+    // --- get joint angle commands ---
     double q_d[20] = {0};
     IK(cmd.r_cot, cmd.R_cot, tilt_ang_des, cmd.l, q_d);
 
-    // --- thrust to pwm [1814ns] ---
+    // --- get pwm ---
     Eigen::Vector4d pwm;
     for (int i = 0; i < 4; ++i) {
       pwm(i) = std::sqrt(std::max(0.0, (thrust_des(i) - param::PWM_B) / param::PWM_A));
       pwm(i) = std::clamp(pwm(i), 0.0, 1.0);
     }
 
-    // --- Overridings for soft start [2077ns] ---
+    // --- overridings for soft start ---
     switch (phase) {
       case Phase::ARMED: {
         for (int i = 0; i < 4; ++i) { pwm(i) = 0.0; }
@@ -421,11 +421,11 @@ int main() {
       } break;
     }
 
-    // --- PWM write [14817ns] ---
+    // --- write pwm ---
     if (!g_killed.load(std::memory_order_relaxed)) {if (!teensy.write_pwm(pwm(0), pwm(1), pwm(2), pwm(3))) {KILL("[CAN] : PLZ CALL GOD");}}
     else {teensy.write_zeros();}
 
-    // --- Dynamixel write [355ns] ---
+    // --- write dynamixel ---
     if (!g_killed.load(std::memory_order_relaxed)) {dxl.write_goal(q_d);}
 
     // ------ [Data logging] -----------------------------------------------------------------------------
@@ -519,8 +519,7 @@ int main() {
       }
     }
 
-
-    // delay for keeping control Hz. May wake up a little early for fresh imu data. [1815030ns]
+    // delay for keeping control Hz. May wake up a little early for fresh imu data.
     const std::chrono::steady_clock::time_point done_tick = std::chrono::steady_clock::now();
     if (done_tick < next_control_tick) {
       if(t265.wait_new_frame_until(next_control_tick, last_t265_cnt)){
@@ -540,8 +539,8 @@ int main() {
   dxl.request_stop();
 
   if (mmap_logger::log_fp) {
-  fclose(mmap_logger::log_fp);
-  mmap_logger::log_fp = nullptr;
+    fclose(mmap_logger::log_fp);
+    mmap_logger::log_fp = nullptr;
   }
 
   if (th_t265.joinable()) th_t265.join();
