@@ -8,6 +8,37 @@
 
 namespace param {
 
+// ===== Path planning Parameters =====
+static inline const Eigen::Vector3d DEFAULT_pos     = Eigen::Vector3d(0.0, -1.0, 1.00);
+static inline const Eigen::Vector3d DEFAULT_r_cot   = Eigen::Vector3d(0.0,  0.0, 0.24);
+static inline const Eigen::Vector3d DEFAULT_heading = Eigen::Vector3d(1.0,  0.0, 0.00);
+static constexpr double DEFAULT_l                   = 0.48;
+
+// ----------------------------------*-*-*-*-*-*-*-*-*-----------P_R
+//                               *   |
+//                         *         |  p(t) = p0 + Δp * (1 - cos(π t / T)) / 2
+//                     *             |  v(t) = Δp * (π / (2T)) * sin(π t / T)
+//                 *                 |  a(t) = Δp * (π² / (2T²)) * cos(π t / T)
+//              *                    |
+//            *                      |
+// -*-*-*-*-*<----- PATH_T_MOVE ---->-----PATH_SETTLE_MAX---->---P_L
+
+static inline const Eigen::Vector3d P_L             = Eigen::Vector3d(0.0, -1.0, 1.0);
+static inline const Eigen::Vector3d P_R             = Eigen::Vector3d(0.0,  1.0, 1.0);
+
+static constexpr double DEFAULT_POS_TOL             = 0.08; // [m]
+static constexpr double DEFAULT_RCOT_TOL            = 0.01; // [m]
+
+static constexpr double PATH_T_MOVE                 = 3.00;
+static constexpr double PATH_SETTLE_MAX             = 5.00;
+
+enum class PathStage : uint8_t {
+  HOLD_LEFT   = 0,
+  MOVE_L2R    = 1,
+  HOLD_RIGHT  = 2,
+  MOVE_R2L    = 3,
+};
+
 // ===== Geometry position control gain =====
 static constexpr double kX[3]  = {28.5, 28.5, 26.00};    // Position gain [x, y, z]
 static constexpr double kV[3]  = {18.0, 18.0, 17.00};    // Velocity gain [x, y, z]

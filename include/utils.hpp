@@ -29,8 +29,10 @@ struct State {
 
 struct Command {
   // These can only be changed by SBUS
-  Eigen::Vector3d pos = Eigen::Vector3d::Zero();        // desired linear position [m]
-  Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector]
+  Eigen::Vector3d pos = Eigen::Vector3d::Zero();        // desired linear position     [m]
+  Eigen::Vector3d vel = Eigen::Vector3d::Zero();        // desired linear velocity     [m] for agile motion --------------------ryung
+  Eigen::Vector3d acc = Eigen::Vector3d::Zero();        // desired linear acceleration [m] for agile motion --------------------ryung
+  Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector] 
   double yaw = 0.0;                                     // desired heading yaw angle [rad] (projection of heading)
   double l   = 0.48;                                    // desired inter-rotor distance [m]
   Eigen::Matrix3d R_cot = Eigen::Matrix3d::Identity();  // desired CoT-body tilt cmd [SO3] (not updated)
@@ -199,6 +201,22 @@ static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Ve
   
   const double inv_dt = 1.0 / (static_cast<double>(dt_ns) * 1e-9);
   return (x_cur - x_prev) * inv_dt;
+}
+
+static inline bool is_near(const double a, const double b, const double tol) {
+  return std::abs(a - b) <= tol;
+}
+
+static inline bool is_near(const Eigen::Vector3d& a, const Eigen::Vector3d& b, const double tol) {
+  return (a - b).norm() <= tol;  
+}
+
+static inline double smooth(const double x, const double x_d, const double alpha) {
+  return (1.0 - alpha) * x + alpha * x_d;
+}
+
+static inline Eigen::Vector3d smooth(const Eigen::Vector3d& x, const Eigen::Vector3d& x_d, const double alpha) {
+  return (1.0 - alpha) * x + alpha * x_d;
 }
 
 // --------- [ Kinematics ] ---------
@@ -453,6 +471,73 @@ static inline double sbus_l_map(const uint16_t ch11) {
   return param::SBUS_L_RANGE[0] + static_cast<double>(ch11 - 352) * l_factor_;
 }
 
+static inline bool sbus_path_edge(const uint16_t ch5, bool& prev_on) {
+  // | <---ON range-->   ON_THR-------------OFF_THR   <---OFF range--> |
+  static constexpr uint16_t ON_THR  = 1500;
+  static constexpr uint16_t OFF_THR = 900;
+
+  bool on = prev_on;
+  if (ch5 >= ON_THR) on = true;
+  else if (ch5 <= OFF_THR) on = false;
+
+  const bool edge = (on && !prev_on);
+  prev_on = on;
+  return edge;
+}
+
+// --------- [ PATH mapping ] ---------
+static inline void path_generator_LR(const std::chrono::steady_clock::time_point& now, const State& s, Command& cmd, const bool btn_edge) {
+  static param::PathStage stage = param::PathStage::HOLD_LEFT;
+  static std::chrono::steady_clock::time_point move_t0;
+
+  auto sine_pva = [&](const Eigen::Vector3d& p0, const Eigen::Vector3d& p1, const double tau, Eigen::Vector3d& p, Eigen::Vector3d& v, Eigen::Vector3d& a) {
+    const Eigen::Vector3d dp = (p1 - p0);
+    const double th = M_PI * tau;
+    const double s_ = std::sin(th);
+    const double c_ = std::cos(th);
+
+    p = p0 + dp * (0.5 * (1.0 - c_));
+    v = dp * (0.5 * (M_PI / param::PATH_T_MOVE) * s_);
+    a = dp * (0.5 * (M_PI / param::PATH_T_MOVE) * (M_PI / param::PATH_T_MOVE) * c_);
+  };
+
+  switch (stage)
+  {
+    case param::PathStage::HOLD_LEFT:
+      cmd.pos = param::P_L;
+      cmd.vel.setZero();
+      cmd.acc.setZero();
+      if (btn_edge) { move_t0 = now; stage = param::PathStage::MOVE_L2R; }
+      break;
+
+    case param::PathStage::MOVE_L2R: {
+      const double dt  = std::chrono::duration<double>(now - move_t0).count();
+      const double tau = std::clamp(dt / param::PATH_T_MOVE, 0.0, 1.0);
+
+      sine_pva(param::P_L, param::P_R, tau, cmd.pos, cmd.vel, cmd.acc);
+
+      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::P_R, param::DEFAULT_POS_TOL)) { stage = param::PathStage::HOLD_RIGHT; }
+    } break;
+
+    case param::PathStage::HOLD_RIGHT:
+      cmd.pos = param::P_R;
+      cmd.vel.setZero();
+      cmd.acc.setZero();
+      if (btn_edge) { move_t0 = now; stage = param::PathStage::MOVE_R2L; }
+      break;
+
+    case param::PathStage::MOVE_R2L: {
+      const double dt  = std::chrono::duration<double>(now - move_t0).count();
+      const double tau = std::clamp(dt / param::PATH_T_MOVE, 0.0, 1.0);
+
+      sine_pva(param::P_R, param::P_L, tau, cmd.pos, cmd.vel, cmd.acc);
+
+      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::P_L, param::DEFAULT_POS_TOL)) { stage = param::PathStage::HOLD_LEFT; }
+    } break;
+  }
+
+  cmd.heading = param::DEFAULT_heading;
+}
 
 // --------- [ ETC ] ---------
 // Best-effort RT priority; will fail without CAP_SYS_NICE.

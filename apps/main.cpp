@@ -136,7 +136,11 @@ int main() {
   bool mpc_in_solving = false;
   uint32_t mpc_key = 1;
   strider_mpc::MPCOutput l_mpc_output;
-  
+
+   // --- PATH parameters ---
+  static bool default_gate = false;
+  static bool prev_btn = false;
+
   { // --- Wait for all sensors to start ---
     std::fprintf(stdout, "\n\n\n\n ||------------------------------------||\n ||--Sensor&Connected device checking--||\n ||------[     T265 -> "); std::fflush(stdout);
     while (!g_killed.load(std::memory_order_relaxed) && !t265.read_latest(t265_frame)) {_mm_pause();}
@@ -219,11 +223,6 @@ int main() {
     const uint64_t cur_sbus_cnt = sbus.get_frame_count();
     if (cur_sbus_cnt > last_sbus_cnt) {
       if (sbus.read_latest(sbus_frame)) {
-        cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
-        cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
-        cmd.l        = sbus_l_map(sbus_frame.ch[11]);
-
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
@@ -234,6 +233,33 @@ int main() {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             phase = Phase::MRG_FLIGHT;
             std::fprintf(stdout, "flight state -> [MRG]\n"); std::fflush(stdout);
+          }
+          if (phase == Phase::MRG_ACTIVE_COT || phase == Phase::MRG_FLIGHT) {
+
+            if (!default_gate) {
+              const bool is_DEFAULTED = is_near(s.pos, param::DEFAULT_pos, param::DEFAULT_POS_TOL) && is_near(s.r_cot, param::DEFAULT_r_cot, param::DEFAULT_RCOT_TOL);
+
+              if (is_DEFAULTED) { default_gate = true;}
+              if (!default_gate) {
+                cmd.pos     = smooth(cmd.pos,   param::DEFAULT_pos,   0.3);
+                cmd.r_cot   = smooth(cmd.r_cot, param::DEFAULT_r_cot, 0.5);
+                cmd.l       = smooth(cmd.l,     param::DEFAULT_l,     0.5);
+                cmd.heading = param::DEFAULT_heading;
+              }
+            }
+
+            if (default_gate) { 
+              const bool btn_edge = sbus_path_edge(sbus_frame.ch[5], prev_btn);
+              path_generator_LR(now, s, cmd, btn_edge);
+            }
+          }
+          else { 
+            // phase == Phase::GAC_FLIGHT -> nomal Flight mode
+            cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
+            cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
+            cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+            cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+            default_gate = false;  // reset gate when leaving PATH-control
           }
         }
         else if (phase == Phase::MRG_FLIGHT) {
@@ -287,6 +313,8 @@ int main() {
 
     // ==== POSITION CONTROL ====
     gac_cmd.xd  = cmd.pos;
+    gac_cmd.xd_dot = cmd.vel;
+    gac_cmd.xd_2dot = cmd.acc;
     gac_cmd.b1d = cmd.heading;
     gac_state.x = s.pos;
     gac_state.v = s.vel;
@@ -339,8 +367,8 @@ int main() {
         }
       }
       else { // cot goes to zero when MPC deactivated
-        // cmd.r_cot(0) *= 0.995;
-        // cmd.r_cot(1) *= 0.995;
+        cmd.r_cot(0) *= 0.995;
+        cmd.r_cot(1) *= 0.995;
       }
     }
 
@@ -364,8 +392,8 @@ int main() {
       }
       else { // solve failed
         cmd.d_theta  *= 0.9;
-        // cmd.r_cot(0)    *= 0.9;
-        // cmd.r_cot(1)    *= 0.9;
+        cmd.r_cot(0) *= 0.995;
+        cmd.r_cot(1) *= 0.995;
         l_mpc_output.u_rate.setZero();
       }
 
