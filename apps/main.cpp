@@ -155,11 +155,11 @@ int main() {
     if (g_killed.load(std::memory_order_relaxed)) {std::fprintf(stdout, "\n\n DXL ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
     else {std::fprintf(stdout, "Good   ]------||\n ||------------------------------------||\n\n\n"); std::fflush(stdout);}
 
-    if (!g_killed.load()) {std::fprintf(stdout, " STRIDER: \"LET'S ROLL.\"\n\n"); std::fflush(stdout);}
-
     // SBUS toggle check.
     if (sbus_frame.ch[7] != 1024 || sbus_frame.ch[8] != 352) {std::fprintf(stdout, "\n\n SBUS toggle set to wrong.\n Check the transmitter -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
   
+    if (!g_killed.load()) {std::fprintf(stdout, " STRIDER: \"LET'S ROLL.\"\n\n"); std::fflush(stdout);}
+
     phase = Phase::ARMED;
   }
 
@@ -227,16 +227,16 @@ int main() {
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
-            phase = Phase::MRG_ACTIVE_COT;
-            std::fprintf(stdout, "flight state -> [MRG_ACTIVE_COT]\n"); std::fflush(stdout);
+            phase = Phase::MRG_YES_COT;
+            std::fprintf(stdout, "flight state -> [MRG_YES_COT]\n"); std::fflush(stdout);
           }
           if (sbus_frame.ch[7] == 352) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
-            phase = Phase::MRG_FLIGHT;
-            std::fprintf(stdout, "flight state -> [MRG]\n"); std::fflush(stdout);
+            phase = Phase::MRG_NO_COT;
+            std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
           }
         }
-        else if (phase == Phase::MRG_FLIGHT) {
+        else if (phase == Phase::MRG_NO_COT) {
           if (sbus_frame.ch[7] == 1024) {
             cmd.d_theta.setZero();         // reset previous optimal u
             l_mpc_output.u_rate.setZero(); // reset previous optimal u
@@ -245,7 +245,7 @@ int main() {
             std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
           }
         }
-        else if (phase == Phase::MRG_ACTIVE_COT) {
+        else if (phase == Phase::MRG_YES_COT) {
           if (sbus_frame.ch[7] == 1024) {
             cmd.d_theta.setZero();         // reset previous optimal u
             l_mpc_output.u_rate.setZero(); // reset previous optimal u
@@ -328,8 +328,8 @@ int main() {
               g_mpc_input.log(n++) = cmd.pos(0); g_mpc_input.log(n++) = cmd.pos(1); g_mpc_input.log(n++) = cmd.pos(2); // pos_des
               g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; // F1234
 
-              if (phase == Phase::MRG_ACTIVE_COT) {g_mpc_input.use_cot = true;}
-              else if (phase == Phase::MRG_FLIGHT) {g_mpc_input.use_cot = false;}
+              if (phase == Phase::MRG_YES_COT) {g_mpc_input.use_cot = true;}
+              else if (phase == Phase::MRG_NO_COT) {g_mpc_input.use_cot = false;}
               g_mpc_input.t = now;
               g_mpc_input.key = mpc_key;
               g_mpc_input.has = true;

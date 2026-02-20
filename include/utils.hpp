@@ -11,8 +11,8 @@ enum class Phase : uint8_t {
   IDLE           = 2,  // all propellers are idling
   RISING         = 3,  // propeller thrust increasing
   GAC_FLIGHT     = 4,  // flight with geometry controller
-  MRG_FLIGHT     = 5,  // flight with reference governor
-  MRG_ACTIVE_COT = 6,  // flight with reference governor (use CoT moving)
+  MRG_NO_COT     = 5,  // flight with reference governor
+  MRG_YES_COT    = 6,  // flight with reference governor (use CoT moving)
   KILLED         = 99, // killed; (It's not used as a trigger, just a state representation)
 };
 
