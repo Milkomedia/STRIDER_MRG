@@ -76,6 +76,7 @@ int main() {
         if (g_mpc_input.has == true) {
           in_local = g_mpc_input;
           g_mpc_input.has = false;
+          g_mpc_busy = true;
         }
       }
 
@@ -88,7 +89,9 @@ int main() {
         g_mpc_output = out_local;
         g_mpc_output.t = in_local.t;
         g_mpc_output.key = in_local.key;
+        g_mpc_output.epoch = in_local.epoch;
         g_mpc_output.has = true;
+        g_mpc_busy = false;
       }
     }
   });
@@ -152,6 +155,9 @@ int main() {
   bool mpc_in_solving = false;
   uint32_t mpc_key = 1;
   strider_mpc::MPCOutput l_mpc_output;
+  l_mpc_output.u_rate.setZero();
+  l_mpc_output.u_opt.setZero();
+  l_mpc_output.t = std::chrono::steady_clock::time_point::max();
   
   { // --- Wait for all sensors to start ---
     std::fprintf(stdout, "\n\n\n\n ||------------------------------------||\n ||--Sensor&Connected device checking--||\n ||------[     T265 -> "); std::fflush(stdout);
@@ -245,11 +251,13 @@ int main() {
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
+            mpc_reset_locked(mpc_key);
             phase = Phase::MRG_YES_COT;
             std::fprintf(stdout, "flight state -> [MRG_YES_COT]\n"); std::fflush(stdout);
           }
           if (sbus_frame.ch[7] == 352) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
+            mpc_reset_locked(mpc_key);
             phase = Phase::MRG_NO_COT;
             std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
           }
@@ -428,7 +436,7 @@ int main() {
 
     // --- get joint angle commands ---
     double q_d[20] = {0};
-    IK(cmd.r1, cmd.r2, cmd.r3, cmd.r4, tilt_ang_des, q_d);
+    IK(param::r1_init, param::r2_init, param::r3_init, param::r4_init, tilt_ang_des, q_d);
 
     // --- get pwm ---
     Eigen::Vector4d pwm;
@@ -585,6 +593,8 @@ int main() {
 
       ld.solve_ms = static_cast<float>(l_mpc_output.solve_ms);
       ld.solve_status = static_cast<int32_t>(l_mpc_output.state);
+
+      ld.phase = static_cast<uint8_t>(phase);
 
       logger.push(ld);
 

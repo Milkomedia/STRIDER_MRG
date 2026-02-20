@@ -18,3 +18,4 @@ Icon?
 # logging File
 *.bin
 bag_bin/
+log/

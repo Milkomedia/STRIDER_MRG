@@ -24,14 +24,11 @@ static fs::path get_executable_path() {
 static void ensure_python_paths() {
   const fs::path exe = get_executable_path();
   const fs::path root = exe.parent_path().parent_path(); // build/ -> project root
-  fs::path cand = root / "resources";
-  const fs::path res = fs::weakly_canonical(cand);
-  const std::string res_s = res.string();
 
   pybind11::module_ sys = pybind11::module_::import("sys");
   pybind11::list sys_path = sys.attr("path");
 
-  sys_path.insert(0, res_s);
+  sys_path.insert(0, root.string());
 }
 
 struct acados_wrapper::Impl {
@@ -40,7 +37,7 @@ struct acados_wrapper::Impl {
   Impl() {
     pybind11::gil_scoped_acquire gil;
     ensure_python_paths();
-    pybind11::module_ mod = pybind11::module_::import("mpc_py.solver");
+    pybind11::module_ mod = pybind11::module_::import("acados.solver");
     solver = mod.attr("StriderNMPC")();
   }
 
