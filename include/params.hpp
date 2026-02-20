@@ -57,6 +57,8 @@ static constexpr double J[9] = {    0.3, -0.0006, -0.0006,
 static constexpr double M  = 7.25;    // [kg]
 static constexpr double G  = 9.80665; // [m/s^2] (must be positive)
 
+static constexpr double SATURATION_THRUST  = 1e12; // {(0.25*M*G) / 0.65} Maximum thrust per each propeller [N]
+
 // ===== Control Allocation =====
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable

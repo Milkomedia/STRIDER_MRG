@@ -22,25 +22,31 @@ struct State {
   Eigen::Vector3d acc = Eigen::Vector3d::Zero();       // current linear acceleration [m/s^2] (Optitrack)
   Eigen::Matrix3d R   = Eigen::Matrix3d::Identity();   // current Rotation matrix [SO3] (T265)
   Eigen::Vector3d omega = Eigen::Vector3d::Zero();     // current angular velocity [rad/s] (T265)
+  Eigen::Vector3d alpha = Eigen::Vector3d::Zero();     // current angular acceleration [rad/s^2] (T265, just logging - not used)
+  Eigen::Vector3d r1  = Eigen::Vector3d::Zero();       // current rotor1 position [m] (Dynamixel)
+  Eigen::Vector3d r2  = Eigen::Vector3d::Zero();       // current rotor2 position [m] (Dynamixel)
+  Eigen::Vector3d r3  = Eigen::Vector3d::Zero();       // current rotor3 position [m] (Dynamixel)
+  Eigen::Vector3d r4  = Eigen::Vector3d::Zero();       // current rotor4 position [m] (Dynamixel)
   Eigen::Vector3d r_cot = Eigen::Vector3d::Zero();     // current b_p_Cot position [m] (Dynamixel)
   double arm_q[20] = {0.0};                            // current joint angle [rad] (Dynamixel)
-  Eigen::Vector3d r_com = 0.523*r_cot;                 // current estimated CoM position [m] 
+  Eigen::Vector3d r_com = Eigen::Vector3d::Zero();     // current estimated CoM position [m] 
 };
 
 struct Command {
-  // These can only be changed by SBUS
   Eigen::Vector3d pos = Eigen::Vector3d::Zero();        // desired linear position     [m]
-  Eigen::Vector3d vel = Eigen::Vector3d::Zero();        // desired linear velocity     [m] for agile motion --------------------ryung
-  Eigen::Vector3d acc = Eigen::Vector3d::Zero();        // desired linear acceleration [m] for agile motion --------------------ryung
-  Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector] 
+  Eigen::Vector3d vel = Eigen::Vector3d::Zero();        // desired linear velocity     [m/s]
+  Eigen::Vector3d acc = Eigen::Vector3d::Zero();        // desired linear acceleration [m/s^2]
   double yaw = 0.0;                                     // desired heading yaw angle [rad] (projection of heading)
-  double l   = 0.48;                                    // desired inter-rotor distance [m]
-  Eigen::Matrix3d R_cot = Eigen::Matrix3d::Identity();  // desired CoT-body tilt cmd [SO3] (not updated)
+  Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector]
   // This can only be changed by Control Allocation
   double tauz_bar  = 0.0;                               // current yaw thrust torque [N.m] (Sequential control allocation)
   // These can only be changed by MRG
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
-  Eigen::Vector3d r_cot = Eigen::Vector3d(0,0,-0.24);   // desired CoT position [m], z-element can be manually changable by SBUS
+  Eigen::Vector3d r1 = Eigen::Vector3d::Zero();         // desired rotor1 position [m], z-element is not updated
+  Eigen::Vector3d r2 = Eigen::Vector3d::Zero();         // desired rotor2 position [m], z-element is not updated
+  Eigen::Vector3d r3 = Eigen::Vector3d::Zero();         // desired rotor3 position [m], z-element is not updated
+  Eigen::Vector3d r4 = Eigen::Vector3d::Zero();         // desired rotor4 position [m], z-element is not updated
+  // NOTE: r1234 can be manually changed by SBUS during [GAC_FLIGHT] phase.
 };
 
 struct Butter {
@@ -280,23 +286,17 @@ static inline void onearm_IK(const Eigen::Vector3d& pos, const Eigen::Vector3d& 
   out5[4] = th5;
 }
 
-static inline void IK(const Eigen::Vector3d& bPcot, const Eigen::Matrix3d& bRcot, const Eigen::Vector4d& th_tvc, const double l, double q[20]) {
-  std::array<Eigen::Vector3d, 4> bodyParm;
-  const Eigen::Vector3d e1 = bRcot.col(0);
-  const Eigen::Vector3d e2 = bRcot.col(1);
-  bodyParm[0] = bPcot + (0.5 * l) * ( e1 - e2);
-  bodyParm[1] = bPcot + (0.5 * l) * (-e1 - e2);
-  bodyParm[2] = bPcot + (0.5 * l) * (-e1 + e2);
-  bodyParm[3] = bPcot + (0.5 * l) * ( e1 + e2);
+static inline void IK(const Eigen::Vector3d& bPa1, const Eigen::Vector3d& bPa2, const Eigen::Vector3d& bPa3, const Eigen::Vector3d& bPa4, const Eigen::Vector4d& th_tvc, double q[20]) {
+  const std::array<Eigen::Vector3d, 4> bodyParm{bPa1, bPa2, bPa3, bPa4};
   std::array<Eigen::Vector3d, 4> bodyE3arm;
   const double s1 = std::sin(th_tvc(0)); const double c1 = std::cos(th_tvc(0));
   const double s2 = std::sin(th_tvc(1)); const double c2 = std::cos(th_tvc(1));
   const double s3 = std::sin(th_tvc(2)); const double c3 = std::cos(th_tvc(2));
   const double s4 = std::sin(th_tvc(3)); const double c4 = std::cos(th_tvc(3));
-  bodyE3arm[0] = bRcot * Eigen::Vector3d( s1*M_SQRT1_2,  s1*M_SQRT1_2, -c1);
-  bodyE3arm[1] = bRcot * Eigen::Vector3d( s2*M_SQRT1_2, -s2*M_SQRT1_2, -c2);
-  bodyE3arm[2] = bRcot * Eigen::Vector3d(-s3*M_SQRT1_2, -s3*M_SQRT1_2, -c3);
-  bodyE3arm[3] = bRcot * Eigen::Vector3d(-s4*M_SQRT1_2,  s4*M_SQRT1_2, -c4);
+  bodyE3arm[0] = Eigen::Vector3d( s1*inv_sqrt2,  s1*inv_sqrt2, -c1);
+  bodyE3arm[1] = Eigen::Vector3d( s2*inv_sqrt2, -s2*inv_sqrt2, -c2);
+  bodyE3arm[2] = Eigen::Vector3d(-s3*inv_sqrt2, -s3*inv_sqrt2, -c3);
+  bodyE3arm[3] = Eigen::Vector3d(-s4*inv_sqrt2,  s4*inv_sqrt2, -c4);
   
   for (uint8_t i = 0; i < 4; ++i) {
     const double s = std::sin(param::B2BASE_THETA[i]);
@@ -321,21 +321,20 @@ static inline void IK(const Eigen::Vector3d& bPcot, const Eigen::Matrix3d& bRcot
 }
 
 static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, double theta) {
-    Eigen::Matrix4d T;
-    const double c_th = cos(theta);
-    const double s_th = sin(theta);
-    const double c_a = cos(alpha);
-    const double s_a = sin(alpha);
-    
-    T << c_th, -s_th * c_a,  s_th * s_a, a * c_th,
-        s_th,   c_th * c_a, -c_th * s_a, a * s_th,
-        0.0,         s_a,        c_a,        d,
-        0.0,         0.0,        0.0,       1.0;
-    return T;
-  }
+  Eigen::Matrix4d T;
+  const double c_th = cos(theta);
+  const double s_th = sin(theta);
+  const double c_a = cos(alpha);
+  const double s_a = sin(alpha);
+  
+  T << c_th, -s_th * c_a,  s_th * s_a, a * c_th,
+      s_th,   c_th * c_a, -c_th * s_a, a * s_th,
+      0.0,         s_a,        c_a,        d,
+      0.0,         0.0,        0.0,       1.0;
+  return T;
+}
 
-
-  static inline Eigen::Vector3d FK(const double q[20]) {
+static inline Eigen::Vector3d FK(const double q[20]) {
   // returns {b}->{cot} position and z-directional heading vector
   Eigen::Vector3d bpcot = Eigen::Vector3d::Zero();
   for (uint8_t i = 0; i < 4; ++i) {
@@ -430,6 +429,23 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
 
 }
 
+static inline Eigen::Vector3d Wrench_2_Torque(const Eigen::Vector4d& F1234, const Eigen::Vector3d& r1, const Eigen::Vector3d& r2, const Eigen::Vector3d& r3, const Eigen::Vector3d& r4, const Eigen::Vector3d& Pc) {
+  Eigen::Matrix<double, 3, 4> A;
+  A(0,0) = -r1(1) + Pc(1);
+  A(0,1) = -r2(1) + Pc(1);
+  A(0,2) = -r3(1) + Pc(1);
+  A(0,3) = -r4(1) + Pc(1);
+  A(1,0) =  r1(0) - Pc(0);
+  A(1,1) =  r2(0) - Pc(0);
+  A(1,2) =  r3(0) - Pc(0);
+  A(1,3) =  r4(0) - Pc(0);
+  A(2,0) = -param::PWM_ZETA;
+  A(2,1) =  param::PWM_ZETA;
+  A(2,2) = -param::PWM_ZETA;
+  A(2,3) =  param::PWM_ZETA;
+  return A * F1234;
+}
+
 // --------- [ SBUS channel mapping ] ---------
 static inline Eigen::Vector3d sbus_pos_map(const uint16_t ch0, const uint16_t ch1, const uint16_t ch2) {
   static constexpr double x_factor_ = param::SBUS_X_RANGE / 672.0;
@@ -464,11 +480,6 @@ static inline Eigen::Vector3d sbus_yaw_map(double& yaw_d, const uint16_t ch3) {
 static inline double sbus_cotz_map(const uint16_t ch10) {
   static constexpr double cotz_factor_ = (param::SBUS_COTZ_RANGE[1] - param::SBUS_COTZ_RANGE[0]) / 1344.0;
   return param::SBUS_COTZ_RANGE[0] + static_cast<double>(ch10 - 352) * cotz_factor_;
-}
-
-static inline double sbus_l_map(const uint16_t ch11) {
-  static constexpr double l_factor_ = (param::SBUS_L_RANGE[1] - param::SBUS_L_RANGE[0]) / 1344.0;
-  return param::SBUS_L_RANGE[0] + static_cast<double>(ch11 - 352) * l_factor_;
 }
 
 static inline bool sbus_path_edge(const uint16_t ch5, bool& prev_on) {

@@ -221,8 +221,8 @@ int main() {
       if (sbus.read_latest(sbus_frame)) {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
-        cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+        // cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
+        // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -295,6 +295,7 @@ int main() {
     gac_state.W = s.omega;
     gac.position_control();
     const Eigen::Matrix3d R_raw = gac_cmd.Rd;
+    const Eigen::Vector3d omega_raw = gac_cmd.Wd;
     const double F_des = -gac.f_total; // (f_total > 0)
     
     // ==== MRG CALC ====
@@ -313,14 +314,14 @@ int main() {
               g_mpc_input.x_0(k++) = s.omega(0); g_mpc_input.x_0(k++) = s.omega(1); g_mpc_input.x_0(k++) = s.omega(2); // omega(3,4,5)
               g_mpc_input.x_0(k++) = s.r_cot(0); g_mpc_input.x_0(k++) = s.r_cot(1); // r_cot(6,7)
               g_mpc_input.x_0(k++) = cmd.d_theta(0); g_mpc_input.x_0(k++) = cmd.d_theta(1); g_mpc_input.x_0(k++) = cmd.d_theta(2); // delta_theta(8,9,10)
-              g_mpc_input.x_0(k++) = cmd.r_cot(0); g_mpc_input.x_0(k++) = cmd.r_cot(1); // r_cot_cmd(11,12)
+              // g_mpc_input.x_0(k++) = cmd.r_cot(0); g_mpc_input.x_0(k++) = cmd.r_cot(1); // r_cot_cmd(11,12)
 
               // fill initial control input(u)
               for (int l=0; l<5; ++l) {g_mpc_input.u_0(l) = l_mpc_output.u_rate(l);}
 
               int m = 0; // fill initial parameter(p)
               for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = R_raw(i, j);}} // Rraw_mpc(0~8), column-major order to match CasADi reshape
-              g_mpc_input.p(m++) = 0.5 * cmd.l; // l(9)
+              // g_mpc_input.p(m++) = 0.5 * cmd.l; // l(9)
               g_mpc_input.p(m++) = gac.f_total; // F_des(10)
 
               int n = 0;
@@ -381,18 +382,22 @@ int main() {
     Eigen::Vector3d tau_des = gac.attitude_control(R_d);
     
     // ==== CONTORL ALLOCATION ====
-    Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (f_1234 > 0)
+    Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (thrust_des > 0)
     Eigen::Vector4d tilt_ang_des = Eigen::Vector4d::Zero();
     Sequential_Allocation(F_des, tau_des, cmd.tauz_bar, s.arm_q, s.r_com, thrust_des, tilt_ang_des);
 
+    // --- thruster constraint ---
+    Eigen::Vector4d thrust_cmd   = Eigen::Vector4d::Zero(); // (thrust_cmd > 0)
+    for (uint8_t i=0; i<4; ++i) {thrust_cmd(i) = std::clamp(thrust_des(i), 0.0, param::SATURATION_THRUST);}
+
     // --- get joint angle commands ---
     double q_d[20] = {0};
-    IK(cmd.r_cot, cmd.R_cot, tilt_ang_des, cmd.l, q_d);
+    IK(cmd.r1, cmd.r2, cmd.r3, cmd.r4, tilt_ang_des, q_d);
 
     // --- get pwm ---
     Eigen::Vector4d pwm;
     for (int i = 0; i < 4; ++i) {
-      pwm(i) = std::sqrt(std::max(0.0, (thrust_des(i) - param::PWM_B) / param::PWM_A));
+      pwm(i) = std::sqrt(std::max(0.0, (thrust_cmd(i) - param::PWM_B) / param::PWM_A));
       pwm(i) = std::clamp(pwm(i), 0.0, 1.0);
     }
 
@@ -437,22 +442,22 @@ int main() {
       ld.pos_d[0] = static_cast<float>(cmd.pos(0));
       ld.pos_d[1] = static_cast<float>(cmd.pos(1));
       ld.pos_d[2] = static_cast<float>(cmd.pos(2));
+      ld.vel_d[0] = static_cast<float>(cmd.vel(0));
+      ld.vel_d[1] = static_cast<float>(cmd.vel(1));
+      ld.vel_d[2] = static_cast<float>(cmd.vel(2));
+      ld.acc_d[0] = static_cast<float>(cmd.acc(0));
+      ld.acc_d[1] = static_cast<float>(cmd.acc(1));
+      ld.acc_d[2] = static_cast<float>(cmd.acc(2));
 
       ld.pos[0] = static_cast<float>(s.pos(0));
       ld.pos[1] = static_cast<float>(s.pos(1));
       ld.pos[2] = static_cast<float>(s.pos(2));
-
       ld.vel[0] = static_cast<float>(s.vel(0));
       ld.vel[1] = static_cast<float>(s.vel(1));
       ld.vel[2] = static_cast<float>(s.vel(2));
-
-      ld.rpy[0] = static_cast<float>(euler_rpy(0));
-      ld.rpy[1] = static_cast<float>(euler_rpy(1));
-      ld.rpy[2] = static_cast<float>(euler_rpy(2));
-
-      ld.omega[0] = static_cast<float>(s.omega(0));
-      ld.omega[1] = static_cast<float>(s.omega(1));
-      ld.omega[2] = static_cast<float>(s.omega(2));
+      ld.acc[0] = static_cast<float>(s.acc(0));
+      ld.acc[1] = static_cast<float>(s.acc(1));
+      ld.acc[2] = static_cast<float>(s.acc(2));
 
       {
         const Eigen::Vector3d rpy_raw = R_to_rpy(R_raw);
@@ -466,57 +471,88 @@ int main() {
         ld.rpy_d[1] = static_cast<float>(rpy_d(1));
         ld.rpy_d[2] = static_cast<float>(rpy_d(2));
       }
+      ld.omega_d[0] = static_cast<float>(omega_raw(0));
+      ld.omega_d[1] = static_cast<float>(omega_raw(1));
+      ld.omega_d[2] = static_cast<float>(omega_raw(2));
+      ld.alpha_d[0] = static_cast<float>(gac_cmd.Wd_dot(0));
+      ld.alpha_d[1] = static_cast<float>(gac_cmd.Wd_dot(1));
+      ld.alpha_d[2] = static_cast<float>(gac_cmd.Wd_dot(2));
 
+      ld.rpy[0]   = static_cast<float>(euler_rpy(0));
+      ld.rpy[1]   = static_cast<float>(euler_rpy(1));
+      ld.rpy[2]   = static_cast<float>(euler_rpy(2));
+      ld.omega[0] = static_cast<float>(s.omega(0));
+      ld.omega[1] = static_cast<float>(s.omega(1));
+      ld.omega[2] = static_cast<float>(s.omega(2));
+      ld.alpha[0] = static_cast<float>(s.alpha(0));
+      ld.alpha[1] = static_cast<float>(s.alpha(1));
+      ld.alpha[2] = static_cast<float>(s.alpha(2));
+
+      ld.f_total  = static_cast<float>(gac.f_total);
       ld.tau_d[0] = static_cast<float>(tau_des(0));
       ld.tau_d[1] = static_cast<float>(tau_des(1));
       ld.tau_d[2] = static_cast<float>(tau_des(2));
 
+      ld.tau_z_t        = static_cast<float>(cmd.tauz_bar);
+      ld.tilt_rad[0]    = static_cast<float>(tilt_ang_des(0));
+      ld.tilt_rad[1]    = static_cast<float>(tilt_ang_des(1));
+      ld.tilt_rad[2]    = static_cast<float>(tilt_ang_des(2));
+      ld.tilt_rad[3]    = static_cast<float>(tilt_ang_des(3));
+      ld.f_thrst[0]     = static_cast<float>(thrust_des(0));
+      ld.f_thrst[1]     = static_cast<float>(thrust_des(1));
+      ld.f_thrst[2]     = static_cast<float>(thrust_des(2));
+      ld.f_thrst[3]     = static_cast<float>(thrust_des(3));
+      ld.f_thrst_con[0] = static_cast<float>(thrust_cmd(0));
+      ld.f_thrst_con[1] = static_cast<float>(thrust_cmd(1));
+      ld.f_thrst_con[2] = static_cast<float>(thrust_cmd(2));
+      ld.f_thrst_con[3] = static_cast<float>(thrust_cmd(3));
+
       {
-        const double f_total = gac.f_total;
-        const Eigen::Vector2d tau_off(-f_total * s.r_cot(1), f_total * s.r_cot(0));
+        const Eigen::Vector2d tau_off(F_des*(s.r_cot(1)-s.r_com(1)), -F_des*(s.r_cot(0)-s.r_com(0)));
         ld.tau_off[0] = static_cast<float>(tau_off(0));
         ld.tau_off[1] = static_cast<float>(tau_off(1));
-
-        ld.tau_thrust[0] = static_cast<float>(tau_des(0) - tau_off(0));
-        ld.tau_thrust[1] = static_cast<float>(tau_des(1) - tau_off(1));
+      }
+      {
+        const Eigen::Vector3d tau_thrust = Wrench_2_Torque(thrust_cmd, s.r1, s.r2, s.r3, s.r4, s.r_com);
+        ld.tau_thrust[0] = static_cast<float>(tau_thrust(0));
+        ld.tau_thrust[1] = static_cast<float>(tau_thrust(1));
+        ld.tau_thrust[2] = static_cast<float>(tau_thrust(2));
       }
 
-      for (int i = 0; i < 4; ++i) {
-        ld.tilt_rad[i] = static_cast<float>(tilt_ang_des(i));
-        ld.f_thrust[i] = static_cast<float>(thrust_des(i));
-      }
-      ld.f_total = static_cast<float>(gac.f_total);
+        ld.r_rotor1[0] = static_cast<float>(s.r1(0));
+        ld.r_rotor1[1] = static_cast<float>(s.r1(1));
+        ld.r_rotor2[0] = static_cast<float>(s.r2(0));
+        ld.r_rotor2[1] = static_cast<float>(s.r2(1));
+        ld.r_rotor3[0] = static_cast<float>(s.r3(0));
+        ld.r_rotor3[1] = static_cast<float>(s.r3(1));
+        ld.r_rotor4[0] = static_cast<float>(s.r4(0));
+        ld.r_rotor4[1] = static_cast<float>(s.r4(1));
+        ld.r_cot[0] = static_cast<float>(s.r_cot(0));
+        ld.r_cot[1] = static_cast<float>(s.r_cot(1));
 
-      ld.r_cot[0] = static_cast<float>(s.r_cot(0));
-      ld.r_cot[1] = static_cast<float>(s.r_cot(1));
-      ld.r_cot[2] = static_cast<float>(s.r_cot(2));
+        ld.r_rotor1_d[0] = static_cast<float>(cmd.r1(0));
+        ld.r_rotor1_d[1] = static_cast<float>(cmd.r1(1));
+        ld.r_rotor2_d[0] = static_cast<float>(cmd.r2(0));
+        ld.r_rotor2_d[1] = static_cast<float>(cmd.r2(1));
+        ld.r_rotor3_d[0] = static_cast<float>(cmd.r3(0));
+        ld.r_rotor3_d[1] = static_cast<float>(cmd.r3(1));
+        ld.r_rotor4_d[0] = static_cast<float>(cmd.r4(0));
+        ld.r_rotor4_d[1] = static_cast<float>(cmd.r4(1));
+        {
+          const Eigen::Vector3d r_cot_d = (cmd.r1 + cmd.r2 + cmd.r3 + cmd.r4) / 4.0;
+          ld.r_cot_d[0] = static_cast<float>(r_cot_d(0));
+          ld.r_cot_d[1] = static_cast<float>(r_cot_d(1));
+        }
 
-      ld.r_cot_cmd[0] = static_cast<float>(cmd.r_cot(0));
-      ld.r_cot_cmd[1] = static_cast<float>(cmd.r_cot(1));
-      ld.r_cot_cmd[2] = static_cast<float>(cmd.r_cot(2));
+      for (uint8_t i=0; i<20; ++i){ld.q[i]     = static_cast<float>(s.arm_q[i]);}
+      for (uint8_t i=0; i<20; ++i){ld.q_cmd[i] = static_cast<float>(q_d[i]);}
 
-      for (int i = 0; i < 20; ++i) {
-        ld.q_mea[i] = static_cast<float>(s.arm_q[i]);
-        ld.q_d[i]   = static_cast<float>(q_d[i]);
-      }
-
-      // solve
       ld.solve_ms = static_cast<float>(l_mpc_output.solve_ms);
       ld.solve_status = static_cast<int32_t>(l_mpc_output.state);
 
-      ld.sbus_used[0] = sbus_frame.ch[0];   // pos_x
-      ld.sbus_used[1] = sbus_frame.ch[1];   // pos_y
-      ld.sbus_used[2] = sbus_frame.ch[2];   // pos_z
-      ld.sbus_used[3] = sbus_frame.ch[3];   // heading/yaw
-      ld.sbus_used[4] = sbus_frame.ch[7];   // mode
-      ld.sbus_used[5] = sbus_frame.ch[8];   // toggle
-      ld.sbus_used[6] = sbus_frame.ch[10];  // L-dial
-      ld.sbus_used[7] = sbus_frame.ch[11];  // R-dial
-
       logger.push(ld);
-      if (mmap_logger::log_fp) {
-        std::fwrite(&ld, sizeof(ld), 1, mmap_logger::log_fp);
-      }
+
+      if (mmap_logger::log_fp) {std::fwrite(&ld, sizeof(ld), 1, mmap_logger::log_fp);}
     }
 
     // delay for keeping control Hz. May wake up a little early for fresh imu data.

@@ -30,9 +30,9 @@ void MMapLogger::open() {
   if (reset_) {
     std::memset(base_, 0, map_size_);
 
-    const char kMagic[8] = {'S','T','R','L','O','G','2','\0'};
+    const char kMagic[8] = {'S','T','R','L','O','G','3','\0'};
     std::memcpy(header_->magic, kMagic, 8);
-    header_->version = 2;
+    header_->version = 3;
     header_->header_size = static_cast<uint32_t>(sizeof(MMapHeader));
     header_->capacity = k_Cap;
     header_->slot_size = static_cast<uint32_t>(sizeof(Slot));
@@ -42,15 +42,15 @@ void MMapLogger::open() {
     atomic_store_u64(&header_->write_count, 0);
   } else {
     // Validate basic compatibility; if mismatch, reset.
-    if (std::strncmp(header_->magic, "STRLOG2", 7) != 0 ||
-        header_->version != 2 ||
+    if (std::strncmp(header_->magic, "STRLOG3", 7) != 0 ||
+        header_->version != 3 ||
         header_->capacity != k_Cap ||
         header_->slot_size != sizeof(Slot) ||
         header_->header_size != sizeof(MMapHeader)) {
       std::memset(base_, 0, map_size_);
-      const char kMagic[8] = {'S','T','R','L','O','G','2','\0'};
+      const char kMagic[8] = {'S','T','R','L','O','G','3','\0'};
       std::memcpy(header_->magic, kMagic, 8);
-      header_->version = 2;
+      header_->version = 3;
       header_->header_size = static_cast<uint32_t>(sizeof(MMapHeader));
       header_->capacity = k_Cap;
       header_->slot_size = static_cast<uint32_t>(sizeof(Slot));
