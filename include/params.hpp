@@ -57,6 +57,11 @@ static constexpr double J[9] = {    0.3, -0.0006, -0.0006,
 static constexpr double M  = 7.25;    // [kg]
 static constexpr double G  = 9.80665; // [m/s^2] (must be positive)
 
+inline constexpr double COM_OFF_X   = 0.0; // distance from the body frame to com position (x) [m]
+inline constexpr double COM_OFF_Y   = 0.0; // distance from the body frame to com position (y) [m]
+inline constexpr double COT_2_COM_X = 0.523; // The rate at which CoM changes as the arm moves (x)
+inline constexpr double COT_2_COM_Y = 0.523; // The rate at which CoM changes as the arm moves (y)
+
 static constexpr double SATURATION_THRUST  = 1e12; // {(0.25*M*G) / 0.65} Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====

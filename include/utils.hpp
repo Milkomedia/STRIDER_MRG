@@ -334,18 +334,17 @@ static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, doubl
   return T;
 }
 
-static inline Eigen::Vector3d FK(const double q[20]) {
-  // returns {b}->{cot} position and z-directional heading vector
-  Eigen::Vector3d bpcot = Eigen::Vector3d::Zero();
+static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3d& r1, Eigen::Vector3d& r2, Eigen::Vector3d& r3, Eigen::Vector3d& r4) {
+  std::array<Eigen::Vector3d*, 4> bparm = {&r1, &r2, &r3, &r4};
+
   for (uint8_t i = 0; i < 4; ++i) {
     Eigen::Matrix4d T_i = Eigen::Matrix4d::Identity();
     T_i *= compute_DH(param::B2BASE_A[i], param::B2BASE_ALPHA[i], 0.0, param::B2BASE_THETA[i]);
     for (int j = 0; j < 5; ++j) {T_i *= compute_DH(param::DH_ARM_A[j], param::DH_ARM_ALPHA[j], 0.0, q[5*i+j]);}
-    bpcot += T_i.block<3, 1>(0, 3);
+    *(bparm[i]) = T_i.block<3,1>(0,3);
+    bpcot += *(bparm[i]);
   }
   bpcot *= 0.25;
-
-  return bpcot;
 }
 
 // --------- [ Control Allocation ] ---------
