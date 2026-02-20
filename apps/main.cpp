@@ -190,7 +190,7 @@ int main() {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
 
         // gyro frame transformation
-        s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_bf[2].update(-t265_frame.omega[1], now);
+        s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
 
         last_t265_cnt = cur_t265_cnt;
       }
@@ -207,7 +207,7 @@ int main() {
         s.pos(0)=opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2)=-opti_frame.pos[2];
 
         const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
-        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), now); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), now); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), now);
+        s.vel(0) = opti_vel_bf[0].update(vel_raw(0), opti_frame.host_time_ns); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), opti_frame.host_time_ns); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), opti_frame.host_time_ns);
 
         s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
 

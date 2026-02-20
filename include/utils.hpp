@@ -53,27 +53,27 @@ struct Butter {
   double wc2_{0.0};
   double wc_sqrt2_{0.0};
 
-  std::chrono::steady_clock::time_point last_time_;
+  uint64_t last_ns_{0};
   bool has_last_time_{false};
 
-  explicit Butter(const double cutoff_hz)
-  {
+  explicit Butter(const double cutoff_hz) {
     wc_ = 2.0 * M_PI * cutoff_hz;
     wc2_ = wc_ * wc_;
     wc_sqrt2_ = std::sqrt(2.0) * wc_;
   }
 
-  inline double update(const double raw, const std::chrono::steady_clock::time_point& now_time)
-  {
+  inline double update(const double raw, const uint64_t now_ns) {
+    // time count
     double dt = 1e12;
     if (has_last_time_) {
-      dt = std::chrono::duration<double>(now_time - last_time_).count();
+      if (now_ns > last_ns_) {dt = static_cast<double>(now_ns - last_ns_) * 1e-9;}
+      else {return raw;}
     }
-    last_time_ = now_time;
-    has_last_time_ = true;
+    else {has_last_time_ = true;}
+    last_ns_ = now_ns;
+    if (dt <= 1e-8 || dt > 1.0) {return raw;}
 
-    if (dt <= 0.0 || dt > 1.0) { return raw; }
-
+    // calc filter
     const double dx1 = -wc_sqrt2_ * bf_x1_ - wc2_ * bf_x2_ + raw;
     const double dx2 = bf_x1_;
 
@@ -87,13 +87,13 @@ struct Butter {
   {
     bf_x1_ = 0.0;
     bf_x2_ = 0.0;
+    last_ns_ = 0;
     has_last_time_ = false;
   }
 };
 
 // --------- [ Math utility ] ---------
 static inline constexpr double inv_sqrt2 = 0.7071067811865474617150084668537601828575;  // 1/sqrt(2)
-static inline constexpr double sqrt2 = 1.4142135623730951454746218587388284504414;      // sqrt(2)
 
 static inline Eigen::Vector3d quat_to_RPY(const Eigen::Quaterniond q) {
   // Quaternion to Euler angle map
