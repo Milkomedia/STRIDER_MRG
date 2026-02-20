@@ -144,6 +144,8 @@ int main() {
   cmd.r2 = param::r2_init;
   cmd.r3 = param::r3_init;
   cmd.r4 = param::r4_init;
+  Eigen::Vector3d prev_omega = Eigen::Vector3d::Zero();
+  uint64_t prev_omega_ns = 0;
   double rising_coeff = param::INITIAL_RISING_COEFF;
 
   // --- MRG parameters ---
@@ -206,6 +208,8 @@ int main() {
         // gyro frame transformation
         s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
 
+        s.alpha = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns); prev_omega = s.omega; prev_omega_ns = t265_frame.host_time_ns;
+
         last_t265_cnt = cur_t265_cnt;
       }
     }
@@ -235,8 +239,8 @@ int main() {
       if (sbus.read_latest(sbus_frame)) {
         cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
         cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        // cmd.r_cot(2) = sbus_cotz_map(sbus_frame.ch[10]);
-        // cmd.l        = sbus_l_map(sbus_frame.ch[11]);
+        const double z = sbus_cotz_map(sbus_frame.ch[10]);
+        cmd.r1(2) = z; cmd.r2(2) = z; cmd.r3(2) = z; cmd.r4(2) = z;
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
@@ -302,6 +306,8 @@ int main() {
 
     // ==== POSITION CONTROL ====
     gac_cmd.xd  = cmd.pos;
+    gac_cmd.xd_dot = cmd.vel;
+    gac_cmd.xd_2dot = cmd.acc;
     gac_cmd.b1d = cmd.heading;
     gac_state.x = s.pos;
     gac_state.v = s.vel;
