@@ -31,6 +31,16 @@ static std::condition_variable mpc_cv;
 static strider_mpc::MPCInput g_mpc_input;
 static strider_mpc::MPCOutput g_mpc_output;
 static std::atomic<bool> g_mpc_activated{false};
+static std::atomic<uint32_t> g_mpc_epoch{1};
+static bool g_mpc_busy = false;
+
+static inline void mpc_reset_locked(uint32_t& mpc_key) {
+  g_mpc_epoch.fetch_add(1, std::memory_order_relaxed);
+  g_mpc_input.has = false;
+  g_mpc_output.has = false;
+  g_mpc_busy = false;
+  mpc_key += 1; // force key++
+}
 
 int main() {
   try_pin_cpu(param::CPU_MAIN);
@@ -130,6 +140,10 @@ int main() {
   Phase   phase = Phase::READY;
   State   s{};
   Command cmd{};
+  cmd.r1 = param::r1_init;
+  cmd.r2 = param::r2_init;
+  cmd.r3 = param::r3_init;
+  cmd.r4 = param::r4_init;
   double rising_coeff = param::INITIAL_RISING_COEFF;
 
   // --- MRG parameters ---
@@ -173,7 +187,7 @@ int main() {
 
   std::string path = std::string("/home/strider/Desktop/STRIDER_MRG/apps/bag_bin/") + param::Log_File_NAME;
   mmap_logger::log_fp = std::fopen(path.c_str(), "wb");
-  setvbuf(mmap_logger::log_fp, nullptr, _IOFBF, 1<<20); 
+  setvbuf(mmap_logger::log_fp, nullptr, _IOFBF, 1<<20);
   
   // --- time scope definition ---
   std::chrono::steady_clock::time_point next_control_tick = std::chrono::steady_clock::now();
@@ -302,80 +316,95 @@ int main() {
     // ==== MRG CALC ====
     const Eigen::Vector3d euler_rpy = R_to_rpy(s.R);
     { // MPC send
-      std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
-      if (g_mpc_activated.load(std::memory_order_relaxed)) {
-        if (!mpc_in_solving) {
-          if (now >= next_mpc_tick) {
-            if (!g_mpc_output.has) {
-              next_mpc_tick += param::MPC_DT;
-              mpc_key += 1;
-              
-              int k = 0; // fill initial state(x)
-              g_mpc_input.x_0(k++) = euler_rpy(0); g_mpc_input.x_0(k++) = euler_rpy(1); g_mpc_input.x_0(k++) = euler_rpy(2); // theta(0,1,2)
-              g_mpc_input.x_0(k++) = s.omega(0); g_mpc_input.x_0(k++) = s.omega(1); g_mpc_input.x_0(k++) = s.omega(2); // omega(3,4,5)
-              g_mpc_input.x_0(k++) = s.r_cot(0); g_mpc_input.x_0(k++) = s.r_cot(1); // r_cot(6,7)
-              g_mpc_input.x_0(k++) = cmd.d_theta(0); g_mpc_input.x_0(k++) = cmd.d_theta(1); g_mpc_input.x_0(k++) = cmd.d_theta(2); // delta_theta(8,9,10)
-              // g_mpc_input.x_0(k++) = cmd.r_cot(0); g_mpc_input.x_0(k++) = cmd.r_cot(1); // r_cot_cmd(11,12)
+      if (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT) {
+        std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
+        if (!g_mpc_busy && !g_mpc_input.has && !g_mpc_output.has) { // push next solve immediately after the previous output
+          mpc_key += 1;
 
-              // fill initial control input(u)
-              for (int l=0; l<5; ++l) {g_mpc_input.u_0(l) = l_mpc_output.u_rate(l);}
+          int k = 0; // fill initial state(x)
+          g_mpc_input.x_0(k++) = euler_rpy(0); g_mpc_input.x_0(k++) = euler_rpy(1); g_mpc_input.x_0(k++) = euler_rpy(2); // theta(0,1,2)
+          g_mpc_input.x_0(k++) = s.omega(0); g_mpc_input.x_0(k++) = s.omega(1); g_mpc_input.x_0(k++) = s.omega(2); // omega(3,4,5)
+          g_mpc_input.x_0(k++) = s.r1(0); g_mpc_input.x_0(k++) = s.r2(0); g_mpc_input.x_0(k++) = s.r3(0); g_mpc_input.x_0(k++) = s.r4(0); // r_rotor_x(6,7,8,9)
+          g_mpc_input.x_0(k++) = s.r1(1); g_mpc_input.x_0(k++) = s.r2(1); g_mpc_input.x_0(k++) = s.r3(1); g_mpc_input.x_0(k++) = s.r4(1); // r_rotor_y(10,11,12,13)
+          g_mpc_input.x_0(k++) = cmd.d_theta(0); g_mpc_input.x_0(k++) = cmd.d_theta(1); g_mpc_input.x_0(k++) = cmd.d_theta(2); // delta_theta(14,15,16)
+          g_mpc_input.x_0(k++) = cmd.r1(0); g_mpc_input.x_0(k++) = cmd.r2(0); g_mpc_input.x_0(k++) = cmd.r3(0); g_mpc_input.x_0(k++) = cmd.r4(0); // r_rotor_cmd_x(17,18,19,20)
+          g_mpc_input.x_0(k++) = cmd.r1(1); g_mpc_input.x_0(k++) = cmd.r2(1); g_mpc_input.x_0(k++) = cmd.r3(1); g_mpc_input.x_0(k++) = cmd.r4(1); // r_rotor_cmd_y(21,22,23,24)
 
-              int m = 0; // fill initial parameter(p)
-              for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = R_raw(i, j);}} // Rraw_mpc(0~8), column-major order to match CasADi reshape
-              // g_mpc_input.p(m++) = 0.5 * cmd.l; // l(9)
-              g_mpc_input.p(m++) = gac.f_total; // F_des(10)
+          // fill initial control input(u)
+          for (int l=0; l<11; ++l) {g_mpc_input.u_0(l) = l_mpc_output.u_rate(l, 0);}
 
-              int n = 0;
-              g_mpc_input.log(n++) = s.pos(0); g_mpc_input.log(n++) = s.pos(1); g_mpc_input.log(n++) = s.pos(2); // pos_cur
-              g_mpc_input.log(n++) = cmd.pos(0); g_mpc_input.log(n++) = cmd.pos(1); g_mpc_input.log(n++) = cmd.pos(2); // pos_des
-              g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; g_mpc_input.log(n++) = 0.; // F1234
+          int m = 0; // fill initial parameter(p)
+          for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = R_raw(i, j);}} // R_raw(0~8), column-major order to match CasADi reshape
+          g_mpc_input.p(m++) = omega_raw(0); g_mpc_input.p(m++) = omega_raw(1); g_mpc_input.p(m++) = omega_raw(2); // omega_raw(9~11)
+          g_mpc_input.p(m++) = -gac.f_total; // T_des(12)
 
-              if (phase == Phase::MRG_YES_COT) {g_mpc_input.use_cot = true;}
-              else if (phase == Phase::MRG_NO_COT) {g_mpc_input.use_cot = false;}
-              g_mpc_input.t = now;
-              g_mpc_input.key = mpc_key;
-              g_mpc_input.has = true;
-              mpc_cv.notify_one();
-            }
-          }
+          if (phase==Phase::MRG_YES_COT) {g_mpc_input.use_cot = true;}
+          else {g_mpc_input.use_cot = false;}
+
+          g_mpc_input.steps_req = param::N_STEPS_REQ;
+          g_mpc_input.t = now;
+          g_mpc_input.key = mpc_key;
+          g_mpc_input.epoch = g_mpc_epoch.load(std::memory_order_relaxed);
+          g_mpc_input.has = true;
+          g_mpc_busy = true;
+          mpc_cv.notify_one();
         }
-      }
-      else { // cot goes to zero when MPC deactivated
-        // cmd.r_cot(0) *= 0.995;
-        // cmd.r_cot(1) *= 0.995;
       }
     }
 
-    bool got_mpc = false;
-    { // check got_mpc
+    { // MPC get
       std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
       if (g_mpc_output.has) {
-        if (g_mpc_output.key == mpc_key) {
-          l_mpc_output = g_mpc_output;
-          got_mpc = true;
-        }
-        // else{std::printf("\n\n[MPC KEY WRONG ERROR. RESTART NOW]\n\n");}
+        const bool mpc_on = (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT);
+        const bool epoch_ok = (g_mpc_output.epoch == g_mpc_epoch.load(std::memory_order_relaxed));
+        const bool key_ok = (g_mpc_output.key == mpc_key);
+        const bool solve_ok = (g_mpc_output.state == 0);
+
+        // l_mpc_output updated only when solve succeed.
+        if (mpc_on && epoch_ok && key_ok && solve_ok) {l_mpc_output = g_mpc_output;}
+        else if (mpc_on && epoch_ok && !key_ok) {mpc_reset_locked(mpc_key);}
+        l_mpc_output.state = g_mpc_output.state; // *BUT l_mpc_output state indicates previous solve state(for logging)*
+        g_mpc_output.has = false;
       }
     }
 
-    if (got_mpc) { // MPC get
-      if (l_mpc_output.state == 0) {
-        cmd.d_theta = l_mpc_output.u_opt.template head<3>();                  // [0,1,2]
-        // cmd.r_cot(0) = 0.995 * cmd.r_cot(0) + 0.005 * l_mpc_output.u_opt(3);  // [3]
-        // cmd.r_cot(1) = 0.995 * cmd.r_cot(1) + 0.005 * l_mpc_output.u_opt(4);  // [4]
+    if (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT) { // MPC unpack
+      const bool epoch_ok = (l_mpc_output.epoch == g_mpc_epoch.load(std::memory_order_relaxed));
+      const bool time_ok = ((now - l_mpc_output.t) < param::MPC_TIMEOUT_DURATUION);
+      const bool solve_ok = (l_mpc_output.state == 0);
+      if (epoch_ok && time_ok && solve_ok) {
+        const std::size_t idx = static_cast<std::size_t>(std::floor(std::chrono::duration<double>(now - l_mpc_output.t).count() / param::MPC_STEP_DT));
+        cmd.d_theta = l_mpc_output.u_opt.col(idx).head<3>();
+        cmd.r1(0) = l_mpc_output.u_opt(3, idx); cmd.r1(1) = l_mpc_output.u_opt(7, idx);
+        cmd.r2(0) = l_mpc_output.u_opt(4, idx); cmd.r2(1) = l_mpc_output.u_opt(8, idx);
+        cmd.r3(0) = l_mpc_output.u_opt(5, idx); cmd.r3(1) = l_mpc_output.u_opt(9, idx);
+        cmd.r4(0) = l_mpc_output.u_opt(6, idx); cmd.r4(1) = l_mpc_output.u_opt(10, idx);
+        // if (!workspace_guard(cmd.r1, cmd.r2, cmd.r3, cmd.r4)) {
+        //   // cmd.d_theta *= param::GOES_2_ZERO_A;
+        //   // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+        //   // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+        //   // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+        //   // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
+        //   // l_mpc_output.u_rate.setZero();
+        //   l_mpc_output.state = 1;
+        // }
       }
-      else { // solve failed
-        cmd.d_theta  *= 0.9;
-        // cmd.r_cot(0)    *= 0.9;
-        // cmd.r_cot(1)    *= 0.9;
+      else { // solve failed timeout
+        cmd.d_theta *= param::GOES_2_ZERO_A;
+        cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+        cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+        cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+        cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
         l_mpc_output.u_rate.setZero();
       }
-
-      l_mpc_output.has = false;
-
-      // next time to solve
-      if (now >= l_mpc_output.t + param::MPC_DT) {next_mpc_tick = now;}
-      else {next_mpc_tick = l_mpc_output.t + param::MPC_DT;}
+    }
+    else { // only GAC flight
+      cmd.d_theta *= param::GOES_2_ZERO_A;
+      cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+      cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+      cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+      cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
+      l_mpc_output.u_rate.setZero();
     }
 
     // ==== ATTITUDE CONTROL ====

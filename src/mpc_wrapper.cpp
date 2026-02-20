@@ -24,9 +24,14 @@ static fs::path get_executable_path() {
 static void ensure_python_paths() {
   const fs::path exe = get_executable_path();
   const fs::path root = exe.parent_path().parent_path(); // build/ -> project root
+  fs::path cand = root / "resources";
+  const fs::path res = fs::weakly_canonical(cand);
+  const std::string res_s = res.string();
+
   pybind11::module_ sys = pybind11::module_::import("sys");
   pybind11::list sys_path = sys.attr("path");
-  sys_path.insert(0, root.string());
+
+  sys_path.insert(0, res_s);
 }
 
 struct acados_wrapper::Impl {
@@ -35,14 +40,14 @@ struct acados_wrapper::Impl {
   Impl() {
     pybind11::gil_scoped_acquire gil;
     ensure_python_paths();
-    pybind11::module_ mod = pybind11::module_::import("acados.solver");
+    pybind11::module_ mod = pybind11::module_::import("mpc_py.solver");
     solver = mod.attr("StriderNMPC")();
   }
 
   static MPCOutput from_dict(const pybind11::dict& d) {
     MPCOutput out;
-    out.u_opt    = d["u_opt"].cast<Eigen::Matrix<double, param::NU, 1>>();
-    out.u_rate   = d["u_rate"].cast<Eigen::Matrix<double, param::NU_AUG, 1>>();
+    out.u_opt    = d["u_opt"].cast<Eigen::Matrix<double, param::MPC_NU, param::N_STEPS_REQ>>();
+    out.u_rate   = d["u_rate"].cast<Eigen::Matrix<double, param::MPC_NU, param::N_STEPS_REQ>>();
     out.solve_ms = d["solve_ms"].cast<double>();
     out.state    = d["state"].cast<std::uint8_t>();
     return out;
@@ -67,8 +72,8 @@ MPCOutput acados_wrapper::compute(const MPCInput& in) {
   mpci["x_0"]   = in.x_0;
   mpci["u_0"]   = in.u_0;
   mpci["p"]     = in.p;
-  mpci["log"]   = in.log;
   mpci["use_cot"] = pybind11::bool_(in.use_cot);
+  mpci["steps_req"] = pybind11::int_(in.steps_req);
 
   pybind11::object ret = impl_->solver.attr("compute_MPC")(mpci);
   return Impl::from_dict(ret.cast<pybind11::dict>());

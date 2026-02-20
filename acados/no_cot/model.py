@@ -1,9 +1,11 @@
-from . import params as p
+from . import costs as c
+from .. import params as p
 
 from acados_template.acados_model import AcadosModel
 from acados_template.acados_ocp import AcadosOcp
 import casadi as ca
 import numpy as np
+from pathlib import Path
 
 def build_model():
     model = AcadosModel()
@@ -23,15 +25,18 @@ def build_model():
     model.u = u_rate
 
     # Model parameter
-    R_raw = ca.SX.sym('R_raw', 3, 3) # SO3 matrix
-    l     = ca.SX.sym('l')           # [m]
+    R_raw = ca.SX.sym('R_raw', 3, 3) # desired attitude SO3 matrix
+    omega_raw = ca.SX.sym('omega_raw', 3) # desired angular rate [rad/s]
     T_des = ca.SX.sym('T_des')       # [N]
-    model.p  = ca.vertcat(ca.reshape(R_raw, 9, 1), l, T_des)
+    model.p  = ca.vertcat(ca.reshape(R_raw, 9, 1), omega_raw, T_des)
 
     # Constants
     J = ca.DM(p.J_TENSOR)
     J_inv = ca.inv(J)
     zeta = p.ZETA
+    KR = ca.DM(p.KR).reshape((3, 1))
+    KW = ca.DM(p.KW).reshape((3, 1))
+    l = p.L_DIST
 
     # ---------- math utils ----------
     def euler_zyx_to_R(theta: ca.SX) -> ca.SX:
@@ -91,8 +96,10 @@ def build_model():
     # angular rate (omega)
     R = euler_zyx_to_R(theta)  # (body->global)
     R_d = R_raw @ expm_hat(delta_theta_cmd)
-    e_R = 0.5 * vee(R_d.T @ R - R.T @ R_d)
-    tau_d = -p.KR * e_R - p.KW * omega
+    RtRd = R.T @ R_d
+    e_R = 0.5 * vee(RtRd.T - RtRd)
+    e_w = omega - RtRd @ omega_raw
+    tau_d = - KR * e_R - KW * e_w
     omega_dot = J_inv @ (tau_d - ca.cross(omega, J @ omega))
 
     # Augmented dynamics
@@ -103,10 +110,10 @@ def build_model():
     model.f_impl_expr = x_dot - f_expl
 
     # ---------- Propeller thrust expression ----------
-    A = ca.vertcat(ca.horzcat(    l,     l,    -l,    -l),
-                   ca.horzcat(    l,    -l,    -l,     l),
+    A = ca.vertcat(ca.horzcat( l,  l, -l, -l),
+                   ca.horzcat( l, -l, -l,  l),
                    ca.horzcat(-zeta,  zeta, -zeta,  zeta),
-                   ca.horzcat(  1.0,   1.0,   1.0,   1.0))
+                   ca.horzcat( -1.0,  -1.0,  -1.0,  -1.0))
 
     w_d = ca.vertcat(tau_d, T_des)
     F_expr = ca.solve(A, w_d)
@@ -132,11 +139,11 @@ def build_ocp():
     model.cost_y_expr   = ca.vertcat(omega, delta_theta_cmd, delta_theta_cmd_rate) # 1~k-1 ref
     model.cost_y_expr_e = ca.vertcat(omega, delta_theta_cmd) # terminal(k) ref
 
-    ocp.dims.ny   = 9
-    ocp.dims.ny_e = 6
+    ocp.dims.ny   = 13
+    ocp.dims.ny_e = 10
     
-    ocp.cost.W = np.diag(np.concatenate([p.Q_OMEGA, p.Q_THETA, p.R_THETA]).astype(np.float64))
-    ocp.cost.W_e = np.diag(np.concatenate([p.Q_OMEGA, p.Q_THETA]).astype(np.float64))
+    ocp.cost.W = np.diag(np.concatenate([c.Q_OMEGA, c.Q_THETA, c.R_THETA]).astype(np.float64))
+    ocp.cost.W_e = np.diag(np.concatenate([c.Q_OMEGA, c.Q_THETA]).astype(np.float64))
 
     ocp.cost.cost_type   = "NONLINEAR_LS"
     ocp.cost.cost_type_e = "NONLINEAR_LS"
@@ -148,8 +155,8 @@ def build_ocp():
     ocp.constraints.x0 = np.zeros(model.x.size()[0])
 
     # ---------- h_expr constraints ----------
-    ocp.constraints.lh   = p.F_MIN
-    ocp.constraints.uh   = p.F_MAX
+    ocp.constraints.lh   = c.F_MIN
+    ocp.constraints.uh   = c.F_MAX
     ocp.dims.nh   = 4
 
     # ---------- solver options ----------
@@ -164,5 +171,8 @@ def build_ocp():
     # ocp.solver_options.print_level = 4
 
     # codegen dir
-    ocp.code_export_directory = "generated"
+    codegen_dir = Path(__file__).resolve().parent / "generated"
+    ocp.code_export_directory = str(codegen_dir)
+    codegen_dir.mkdir(parents=True, exist_ok=True)
+
     return ocp
