@@ -124,7 +124,7 @@ int main() {
 
   // --- sensor measurement filters ---
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
-  Butter gyro_bf[3] = {Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_XY_CUTOFF_HZ), Butter(param::GYRO_Z_CUTOFF_HZ)};
+  Butter gyro_z_bf = Butter(param::GYRO_Z_CUTOFF_HZ);
 
   // --- other parameters ---
   Phase   phase = Phase::READY;
