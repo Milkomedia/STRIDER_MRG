@@ -159,6 +159,12 @@ int main() {
   l_mpc_output.u_opt.setZero();
   l_mpc_output.t = std::chrono::steady_clock::time_point::max();
   
+   // --- PATH parameters ---
+  static bool initial_gate = false;
+  static bool prev_btn = false;
+  static int last_mode = -1; // 0=MANUAL, 1=PATH
+  static int last_gate = -1; // 0=INITING, 1=INIT_DONE
+
   { // --- Wait for all sensors to start ---
     std::fprintf(stdout, "\n\n\n\n ||------------------------------------||\n ||--Sensor&Connected device checking--||\n ||------[     T265 -> "); std::fflush(stdout);
     while (!g_killed.load(std::memory_order_relaxed) && !t265.read_latest(t265_frame)) {_mm_pause();}
@@ -243,22 +249,20 @@ int main() {
     const uint64_t cur_sbus_cnt = sbus.get_frame_count();
     if (cur_sbus_cnt > last_sbus_cnt) {
       if (sbus.read_latest(sbus_frame)) {
-        cmd.pos      = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
-        cmd.heading  = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]); // cmd yaw & cmd heading are updated simultaneously
-        const double z = sbus_cotz_map(sbus_frame.ch[10]);
-        cmd.r1(2) = z; cmd.r2(2) = z; cmd.r3(2) = z; cmd.r4(2) = z;
 
         if (phase == Phase::GAC_FLIGHT) {
           if (sbus_frame.ch[7] == 1696) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
             phase = Phase::MRG_YES_COT;
+            initial_gate = false;
             std::fprintf(stdout, "flight state -> [MRG_YES_COT]\n"); std::fflush(stdout);
           }
           if (sbus_frame.ch[7] == 352) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
             phase = Phase::MRG_NO_COT;
+            initial_gate = false;
             std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
           }
         }
@@ -295,7 +299,65 @@ int main() {
             }
           }
         }
+          
+        const int PATH_ON = sbus_frame.ch[6] >= 1300 ? 1 : 0;
+        const int mode_now = (phase == Phase::MRG_YES_COT || phase == Phase::MRG_NO_COT || PATH_ON) ? 1 : 0;
+        const int mode_prev = last_mode;
+        static int mode_changed = 0;
+        if (mode_prev == 1 && mode_now == 0) mode_changed = 1;
+        
+        if (mode_now != last_mode) {
+          std::fprintf(stdout, mode_now ? "PATH generator ON\n" : "MANUAL mode ON\n");
+          std::fflush(stdout);
+        }
 
+        if (mode_now) {
+          
+          const bool btn_edge = sbus_path_edge(sbus_frame.ch[5], prev_btn);
+
+          init_manual_to_path(s, cmd, initial_gate);
+
+          if (initial_gate) {
+            // double pos_delta = sbus_pos_map(sbus_frame.ch[10]); 
+            // double time_delta = sbus_time_map(sbus_frame.ch[11]); 
+            double pos_delta = 0.0; 
+            double time_delta = 0.0;
+            path_generator_LR(now, s, cmd, btn_edge, pos_delta, time_delta);
+          }
+          else prev_btn = btn_edge;
+
+          if (initial_gate != last_gate) {
+            std::fprintf(stdout, initial_gate ? "INIT DONE\n" : "INITING...\n");
+            std::fflush(stdout);
+            last_gate = initial_gate;
+          }
+        }
+        else {
+
+          const Eigen::Vector3d bPcot(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]), 0.0);
+ 
+          if (mode_changed) init_path_to_manual(s, cmd, bPcot, mode_changed);
+          else {
+            cmd.pos     = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
+            cmd.heading = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]);
+            cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
+            cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
+            cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
+            cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
+          }
+          
+          if (mode_now != last_mode) {
+            std::fprintf(stdout, mode_changed ? "INIT DONE\n" : "INITING...\n");
+            std::fflush(stdout);
+          }
+
+          initial_gate = false;
+          last_gate = -1;
+        }
+
+        
+
+        last_mode = mode_now;
         last_sbus_cnt = cur_sbus_cnt;
       }
     }
@@ -405,19 +467,19 @@ int main() {
       }
       else { // solve failed timeout
         cmd.d_theta *= param::GOES_2_ZERO_A;
-        cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
-        cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
-        cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
-        cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
+        // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+        // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+        // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+        // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
         l_mpc_output.u_rate.setZero();
       }
     }
     else { // only GAC flight
       cmd.d_theta *= param::GOES_2_ZERO_A;
-      cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
-      cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
-      cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
-      cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
+      // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+      // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+      // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+      // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
       l_mpc_output.u_rate.setZero();
     }
 
@@ -436,8 +498,8 @@ int main() {
 
     // --- get joint angle commands ---
     double q_d[20] = {0};
-    IK(param::r1_init, param::r2_init, param::r3_init, param::r4_init, tilt_ang_des, q_d);
-
+    //IK(param::r1_init, param::r2_init, param::r3_init, param::r4_init, tilt_ang_des, q_d);
+    IK(cmd.r1, cmd.r2, cmd.r3, cmd.r4, tilt_ang_des, q_d);
     // --- get pwm ---
     Eigen::Vector4d pwm;
     for (int i = 0; i < 4; ++i) {

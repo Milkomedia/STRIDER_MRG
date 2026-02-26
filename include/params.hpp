@@ -9,28 +9,23 @@
 namespace param {
 
 // ===== Path planning Parameters =====
-static inline const Eigen::Vector3d DEFAULT_pos     = Eigen::Vector3d(0.0, -1.0, 1.00);
-static inline const Eigen::Vector3d DEFAULT_r_cot   = Eigen::Vector3d(0.0,  0.0, 0.24);
-static inline const Eigen::Vector3d DEFAULT_heading = Eigen::Vector3d(1.0,  0.0, 0.00);
-static constexpr double DEFAULT_l                   = 0.48;
+static inline const Eigen::Vector3d DEFAULT_pos     = Eigen::Vector3d(0.0, -1.0, -1.0);
 
-// ----------------------------------*-*-*-*-*-*-*-*-*-----------P_R
-//                               *   |
-//                         *         |  p(t) = p0 + Δp * (1 - cos(π t / T)) / 2
-//                     *             |  v(t) = Δp * (π / (2T)) * sin(π t / T)
-//                 *                 |  a(t) = Δp * (π² / (2T²)) * cos(π t / T)
-//              *                    |
-//            *                      |
-// -*-*-*-*-*<----- PATH_T_MOVE ---->-----PATH_SETTLE_MAX---->---P_L
+// -----------------------------*-*-*-*-*-*-*-*-*-----------Pos_R
+//                          *   |
+//                    *         |  p(t) = p0 + Δp * (1 - cos(π t / T)) / 2
+//                *             |  v(t) = Δp * (π / (2T)) * sin(π t / T)
+//            *                 |  a(t) = Δp * (π² / (2T²)) * cos(π t / T)
+//         *                    |
+//       *                      |
+// -*-*<----- PATH_T_MOVE ---->-PATH_SETTLE_MAX->---Pos_L
 
-static inline const Eigen::Vector3d P_L             = Eigen::Vector3d(0.0, -1.0, 1.0);
-static inline const Eigen::Vector3d P_R             = Eigen::Vector3d(0.0,  1.0, 1.0);
-
-static constexpr double DEFAULT_POS_TOL             = 0.08; // [m]
-static constexpr double DEFAULT_RCOT_TOL            = 0.01; // [m]
-
-static constexpr double PATH_T_MOVE                 = 3.00;
-static constexpr double PATH_SETTLE_MAX             = 5.00;
+static inline const Eigen::Vector3d Pos_L             = Eigen::Vector3d(0.0, -1.0, -1.0);
+static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(0.0,  1.0, -1.0);
+static constexpr double DEFAULT_POS_TOL             = 0.01; // [m]
+static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
+static constexpr double PATH_T_MOVE                 = 1.50;
+static constexpr double PATH_SETTLE_MAX             = 1.50;
 
 enum class PathStage : uint8_t {
   HOLD_LEFT   = 0,
@@ -45,7 +40,7 @@ static constexpr double kV[3]  = {18.0, 18.0, 17.00};    // Velocity gain [x, y,
 static constexpr double kIX[3] = {15.0, 15.0, 20.0};     // Integral gain [x, y, z]
 
 // ===== Geometry attitude control gain =====
-static constexpr double kR[3]  = {50.0, 46.0,  6.5}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kR[3]  = {50.0, 48.0,  6.5}; // Rotational gain [roll, pitch, yaw]
 static constexpr double kW[3]  = {11.0, 11.0,  3.0}; // angular Velocity gain [roll, pitch, yaw]
 static constexpr double kI     = 0.00;  // Integral gain for roll and pitch -> gaseggi しんで
 static constexpr double kyI    = 1.20;  // Integral gain for yaw
@@ -76,8 +71,8 @@ static constexpr double OPTI_VEL_CUTOFF_HZ = 4.0;
 static constexpr double EX_NORM_MAX         = 2.0;  // position control, position error max [m]
 static constexpr double kIX_SAT[3]          = {15.0, 15.0, 20.0}; // position control, integral max on x,y,z [N]
 
-static constexpr double ROLL_TORQUE_SAT     = 5.0;  // attitude control, torque max [Nm]
-static constexpr double PITCH_TORQUE_SAT    = 5.0;  // attitude control, torque max [Nm]
+static constexpr double ROLL_TORQUE_SAT     = 11.0;  // attitude control, torque max [Nm]
+static constexpr double PITCH_TORQUE_SAT    = 11.0;  // attitude control, torque max [Nm]
 static constexpr double YAW_TORQUE_SAT      = 5.0;  // attitude control, torque max [Nm]
 static constexpr double ER_NORM_MAX         = 50.0 * M_PI / 180.0; // attitude control, attitude error max [rad]
 
