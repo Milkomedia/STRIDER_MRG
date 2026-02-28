@@ -14,8 +14,52 @@ from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush
 import pyqtgraph as pg
 
+import numpy as np
+import math
+
+FC_THRUST_HZ = 0.1
+
 pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
+
+
+def lpf_1pole(x: np.ndarray, t: np.ndarray, fc_hz: float) -> np.ndarray:
+    """
+    1st-order low-pass, causal.
+    y[k] = y[k-1] + a*(x[k]-y[k-1]),  a = 1-exp(-2*pi*fc*dt)
+    - x,t: same length
+    - fc_hz <= 0 -> no filtering
+    """
+    if fc_hz is None or fc_hz <= 0:
+        return x
+
+    x = np.asarray(x, dtype=np.float64)
+    t = np.asarray(t, dtype=np.float64)
+    n = x.size
+    if n == 0:
+        return x
+
+    # robust dt (handle jitter)
+    if n >= 2:
+        dt = np.diff(t)
+        dt = dt[np.isfinite(dt)]
+        dt_med = float(np.median(dt)) if dt.size else 0.0
+    else:
+        dt_med = 0.0
+
+    if dt_med <= 0:
+        return x
+
+    a = 1.0 - math.exp(-2.0 * math.pi * float(fc_hz) * dt_med)
+
+    y = np.empty_like(x)
+    y[0] = x[0]
+    for k in range(1, n):
+        if not np.isfinite(x[k]):
+            y[k] = y[k-1]
+        else:
+            y[k] = y[k-1] + a * (x[k] - y[k-1])
+    return y
 
 class InteractiveViewBox(pg.ViewBox):
   """
@@ -1724,13 +1768,28 @@ class LoggerWindow(QtWidgets.QMainWindow):
       self._curves["tau_z_reaction"].setData(x, tau_thrust[:, 2])
 
       # --- Row 4: thrust / tilt / total thrust ---
+      f_thrst_lp = np.empty_like(f_thrst, dtype=np.float32)
+      f_thrst_con_lp = np.empty_like(f_thrst_con, dtype=np.float32)
       for i in range(4):
-        self._curves[f"F{i+1}"].setData(x, f_thrst[:, i])
-        self._curves[f"F{i+1}_con"].setData(x, f_thrst_con[:, i])
+        f_thrst_lp[:, i] = lpf_1pole(f_thrst[:, i], x, FC_THRUST_HZ).astype(np.float32)
+        f_thrst_con_lp[:, i] = lpf_1pole(f_thrst_con[:, i], x, FC_THRUST_HZ).astype(np.float32)
+
+      tilt_deg_lp = np.empty_like(tilt_deg, dtype=np.float32)
+      for i in range(4):
+        tilt_deg_lp[:, i] = lpf_1pole(tilt_deg[:, i], x, FC_THRUST_HZ).astype(np.float32)
+
+      for i in range(4):
+        self._curves[f"F{i+1}"].setData(x, f_thrst_lp[:, i])
+        self._curves[f"F{i+1}_con"].setData(x, f_thrst_con_lp[:, i])
         k = f"tilt{i+1}"
-        if k in self._curves: self._curves[k].setData(x, tilt_deg[:, i])
-      self._curves["f_des"].setData(x, f_des)
-      self._curves["f_tot"].setData(x, f_thrst_con.sum(axis=1), dtype=np.float32)
+        if k in self._curves:
+          self._curves[k].setData(x, tilt_deg_lp[:, i])
+
+      f_tot = f_thrst_con_lp.sum(axis=1)
+      f_des_lp = lpf_1pole(f_des, x, FC_THRUST_HZ).astype(np.float32)
+
+      self._curves["f_des"].setData(x, f_des_lp)
+      self._curves["f_tot"].setData(x, f_tot, dtype=np.float32)
 
       # --- Row 5: r_cot / solve_ms / solve_status ---
       self._curves["rcot_x_cmd"].setData(x, r_cot_d_mm[:, 0])

@@ -14,7 +14,6 @@
 #include <condition_variable>
 #include <csignal>
 #include <pybind11/embed.h>
-#include <cstdio>
 
 static std::atomic<bool> g_killed{false};
 static void sigint_handler(int) {g_killed.store(true);}
@@ -159,7 +158,7 @@ int main() {
   l_mpc_output.u_opt.setZero();
   l_mpc_output.t = std::chrono::steady_clock::time_point::max();
   
-   // --- PATH parameters ---
+  // --- PATH parameters ---
   static bool initial_gate = false;
   static bool prev_btn = false;
   static int last_mode = -1; // 0=MANUAL, 1=PATH
@@ -198,10 +197,6 @@ int main() {
   mmap_logger::MMapLogger logger("/tmp/strider_log.mmap", /*reset=*/true);
   const std::chrono::steady_clock::time_point initial_time = std::chrono::steady_clock::now();
   logger.open();
-
-  std::string path = std::string("/home/strider/Desktop/STRIDER_MRG/apps/bag_bin/") + param::Log_File_NAME;
-  mmap_logger::log_fp = std::fopen(path.c_str(), "wb");
-  setvbuf(mmap_logger::log_fp, nullptr, _IOFBF, 1<<20);
   
   // --- time scope definition ---
   std::chrono::steady_clock::time_point next_control_tick = std::chrono::steady_clock::now();
@@ -354,9 +349,6 @@ int main() {
           initial_gate = false;
           last_gate = -1;
         }
-
-        
-
         last_mode = mode_now;
         last_sbus_cnt = cur_sbus_cnt;
       }
@@ -660,7 +652,6 @@ int main() {
 
       logger.push(ld);
 
-      if (mmap_logger::log_fp) {std::fwrite(&ld, sizeof(ld), 1, mmap_logger::log_fp);}
     }
 
     // delay for keeping control Hz. May wake up a little early for fresh imu data.
@@ -682,10 +673,6 @@ int main() {
   sbus.request_stop();
   dxl.request_stop();
 
-  if (mmap_logger::log_fp) {
-    fclose(mmap_logger::log_fp);
-    mmap_logger::log_fp = nullptr;
-  }
 
   if (th_t265.joinable()) th_t265.join();
   if (th_opti.joinable()) th_opti.join();

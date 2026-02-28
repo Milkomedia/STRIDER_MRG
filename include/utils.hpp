@@ -511,8 +511,7 @@ static inline void init_manual_to_path(const State& s, Command& cmd, bool& initi
   cmd.r4  = smooth(cmd.r4,  param::r4_init,     0.5);
 }
 
-static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen::Vector3d& bPcot, int& mode_changed)
-{
+static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen::Vector3d& bPcot, int& mode_changed) {
   if (!mode_changed) return;
 
   cmd.pos = smooth(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.0), 1.2);
