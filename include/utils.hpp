@@ -98,6 +98,38 @@ struct Butter {
   }
 };
 
+struct LPF {
+  double lpf_y_{0.0};
+  double wc_{0.0};
+
+  uint64_t last_ns_{0};
+  bool has_last_time_{false};
+
+  explicit LPF(const double cutoff_hz) {
+    wc_ = 2.0 * M_PI * cutoff_hz;
+  }
+
+  inline double update(const double raw, const uint64_t now_ns) {
+    double dt = 1e12;
+    if (has_last_time_) {
+      if (now_ns > last_ns_) { dt = static_cast<double>(now_ns - last_ns_) * 1e-9; }
+      else { return raw; }
+    } else { has_last_time_ = true; }
+    last_ns_ = now_ns;
+    if (dt <= 1e-8 || dt > 1.0) { return raw; }
+
+    const double dy = wc_ * (raw - lpf_y_);
+    lpf_y_ += dy * dt;
+    return lpf_y_;
+  }
+
+  inline void reset() {
+    lpf_y_ = 0.0;
+    last_ns_ = 0;
+    has_last_time_ = false;
+  }
+};
+
 // --------- [ Math utility ] ---------
 static inline constexpr double inv_sqrt2 = 0.7071067811865474617150084668537601828575;  // 1/sqrt(2)
 

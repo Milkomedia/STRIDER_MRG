@@ -136,6 +136,7 @@ int main() {
 
   // --- sensor measurement filters ---
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
+  LPF gyro_xy_lpf[2] = { LPF(param::GYRO_XY_CUTOFF_HZ), LPF(param::GYRO_XY_CUTOFF_HZ) };
   Butter gyro_z_bf = Butter(param::GYRO_Z_CUTOFF_HZ);
 
   // --- other parameters ---
@@ -213,7 +214,9 @@ int main() {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
 
         // gyro frame transformation
-        s.omega(0) = -t265_frame.omega[2]; s.omega(1) =  t265_frame.omega[0]; s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
+        s.omega(0) = gyro_xy_lpf[0].update(-t265_frame.omega[2], t265_frame.host_time_ns);
+        s.omega(1) = gyro_xy_lpf[1].update(t265_frame.omega[0], t265_frame.host_time_ns);
+        s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
 
         s.alpha = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns); prev_omega = s.omega; prev_omega_ns = t265_frame.host_time_ns;
 

@@ -24,6 +24,10 @@
 #include <asm/termbits.h>
 #include <linux/serial.h>
 
+#include <cinttypes>  // PRIu64
+#include <cmath>      // std::abs
+#include <algorithm>
+
 // Stop only; caller must join the owning std::thread before destroying this object.
 SBUS::~SBUS() {
   request_stop();
@@ -163,6 +167,12 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
   return true;
 }
 
+static inline int sw3_class(uint16_t v) {
+  if (v < 700) return 0;       // LOW
+  if (v < 1400) return 1;      // MID
+  return 2;                    // HIGH
+}
+
 void SBUS::run() {
   stop_request_.store(false, std::memory_order_relaxed);
   is_running_.store(true, std::memory_order_release);
@@ -269,7 +279,28 @@ void SBUS::run() {
         continue;
       }
 
-      // valid frame
+      // Safety checks
+       if (fs == 2) {
+        ::close(fd);
+        stop_request_.store(true, std::memory_order_relaxed);
+        call_kill("[SBUS] FAILSAFE flag set");
+        break;
+      }
+
+      if (fs == 1) {
+        lost_consecutive++;
+        if (lost_consecutive >= lost_consecutive_kill_) {
+          ::close(fd);
+          stop_request_.store(true, std::memory_order_relaxed);
+          call_kill("[SBUS] LOST flag persisted");
+          break;
+        }
+
+        i += 25;
+        continue;
+      } else {
+        lost_consecutive = 0;
+      }
       const uint64_t host_ns = now_steady_ns();
       SBUSFrame s;
       s.host_time_ns = host_ns;
@@ -285,24 +316,6 @@ void SBUS::run() {
       last_host_ns_.store(host_ns, std::memory_order_relaxed);
       last_good_ns = host_ns;
       started = true;
-
-      // Safety checks
-      if (s.failsafe == 2) {
-        ::close(fd);
-        stop_request_.store(true, std::memory_order_relaxed);
-        call_kill("[SBUS] FAILSAFE flag set");
-        break;
-      }
-      if (s.failsafe == 1) {
-        lost_consecutive++;
-        if (lost_consecutive >= lost_consecutive_kill_) {
-          ::close(fd);
-          stop_request_.store(true, std::memory_order_relaxed);
-          call_kill("[SBUS] LOST flag persisted");
-          break;
-        }
-      }
-      else {lost_consecutive = 0;}
 
       if (s.ch[kill_chn_idx_] != arm_val_) {
         char msg[128];

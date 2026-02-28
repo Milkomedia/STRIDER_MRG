@@ -64,6 +64,7 @@ static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable
 
 // ===== Butterworth cutoff frequencys =====
+static constexpr double GYRO_XY_CUTOFF_HZ = 30.0;
 static constexpr double GYRO_Z_CUTOFF_HZ   = 5.0;
 static constexpr double OPTI_VEL_CUTOFF_HZ = 4.0;
 
