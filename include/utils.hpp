@@ -536,7 +536,7 @@ static inline void init_manual_to_path(const State& s, Command& cmd, bool& initi
 
   if (setting_done) { initial_gate = true; return; }
 
-  cmd.pos = smooth(cmd.pos, param::DEFAULT_pos, 0.8);
+  cmd.pos = smooth(cmd.pos, param::DEFAULT_pos, 1.5);
   cmd.r1  = smooth(cmd.r1,  param::r1_init,     0.5);
   cmd.r2  = smooth(cmd.r2,  param::r2_init,     0.5);
   cmd.r3  = smooth(cmd.r3,  param::r3_init,     0.5);
@@ -546,14 +546,14 @@ static inline void init_manual_to_path(const State& s, Command& cmd, bool& initi
 static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen::Vector3d& bPcot, int& mode_changed) {
   if (!mode_changed) return;
 
-  cmd.pos = smooth(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.0), 1.2);
+  cmd.pos = smooth(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.2), 1.5);
   cmd.r1 = smooth(cmd.r1,            param::r1_init + bPcot, 0.5);
   cmd.r2 = smooth(cmd.r2,            param::r2_init + bPcot, 0.5);
   cmd.r3 = smooth(cmd.r3,            param::r3_init + bPcot, 0.5);
   cmd.r4 = smooth(cmd.r4,            param::r4_init + bPcot, 0.5);
 
   const bool setting_done =
-    is_near(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.0), param::DEFAULT_POS_TOL) &&
+    is_near(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.2), param::DEFAULT_POS_TOL) &&
     is_near(s.r1,             param::r1_init + bPcot, param::DEFAULT_ARM_TOL) &&
     is_near(s.r2,             param::r2_init + bPcot, param::DEFAULT_ARM_TOL) &&
     is_near(s.r3,             param::r3_init + bPcot, param::DEFAULT_ARM_TOL) &&
@@ -576,7 +576,7 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
     const double c_ = std::cos(th);
 
     p = p0 + dp * (0.5 * (1.0 - c_));
-    v = 0.3 * dp * (0.5 * (M_PI / T_move) * s_);
+    v = 0.0 * dp * (0.5 * (M_PI / T_move) * s_);
     // a = dp * (0.5 * (M_PI / T_move) * (M_PI / T_move) * c_);
     //v = Eigen::Vector3d(0.0, 0.0, 0.0);
     a = Eigen::Vector3d(0.0, 0.0, 0.0);

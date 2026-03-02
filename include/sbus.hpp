@@ -31,6 +31,52 @@ struct SBUSFrame {
   uint8_t failsafe = 0;       // 0=OK, 1=LOST, 2=FAILSAFE
 };
 
+struct Debounced3Pos {
+    enum class Pos : uint8_t {LOW=0, MID=1, HIGH=2};
+
+    int n_req = 4;
+    int thr_lo = 700;
+    int thr_hi = 1400;
+
+    Pos stable = Pos::MID;
+    Pos cand   = Pos::MID;
+    int cnt    = 0;
+
+    static Pos quantize(uint16_t v, int lo, int hi) {
+        if (v < (uint16_t)lo) return Pos::LOW;
+        if (v > (uint16_t)hi) return Pos::HIGH;
+        return Pos::MID;
+    }
+
+    bool update(uint16_t raw) {
+        Pos q = quantize(raw, thr_lo, thr_hi);
+
+        if (q == stable) {
+            cand = stable;
+            cnt = 0;
+            return false;
+        }
+
+        if (q != cand) {
+            cand = q;
+            cnt = 1;
+            return false;
+        }
+
+        cnt++;
+        if (cnt >= n_req) {
+            stable = cand;
+            cnt = 0;
+            return true;
+        }
+        return false;
+    }
+
+    bool low()  const { return stable == Pos::LOW;  }
+    bool mid()  const { return stable == Pos::MID;  }
+    bool high() const { return stable == Pos::HIGH; }
+};
+
 class SBUS {
 public:
   using KillFn = void(*)(const char* msg);

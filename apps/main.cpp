@@ -216,6 +216,8 @@ int main() {
         // gyro frame transformation
         s.omega(0) = gyro_xy_lpf[0].update(-t265_frame.omega[2], t265_frame.host_time_ns);
         s.omega(1) = gyro_xy_lpf[1].update(t265_frame.omega[0], t265_frame.host_time_ns);
+        // s.omega(0) = -t265_frame.omega[2];
+        // s.omega(1) =  t265_frame.omega[0];
         s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
 
         s.alpha = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns); prev_omega = s.omega; prev_omega_ns = t265_frame.host_time_ns;
@@ -248,15 +250,20 @@ int main() {
     if (cur_sbus_cnt > last_sbus_cnt) {
       if (sbus.read_latest(sbus_frame)) {
 
+        static Debounced3Pos db_ch7;
+        static Debounced3Pos db_ch8;
+        const bool ch7_changed = db_ch7.update(sbus_frame.ch[7]);
+        const bool ch8_changed = db_ch8.update(sbus_frame.ch[8]);
+
         if (phase == Phase::GAC_FLIGHT) {
-          if (sbus_frame.ch[7] == 1696) {
+          if (ch7_changed && db_ch7.high()) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
             phase = Phase::MRG_YES_COT;
             initial_gate = false;
             std::fprintf(stdout, "flight state -> [MRG_YES_COT]\n"); std::fflush(stdout);
           }
-          if (sbus_frame.ch[7] == 352) {
+          if (ch7_changed && db_ch7.low()) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
             phase = Phase::MRG_NO_COT;
@@ -265,7 +272,7 @@ int main() {
           }
         }
         else if (phase == Phase::MRG_NO_COT) {
-          if (sbus_frame.ch[7] == 1024) {
+          if (ch7_changed && db_ch7.mid()) {
             cmd.d_theta.setZero();         // reset previous optimal u
             l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
@@ -274,7 +281,7 @@ int main() {
           }
         }
         else if (phase == Phase::MRG_YES_COT) {
-          if (sbus_frame.ch[7] == 1024) {
+          if (ch7_changed && db_ch7.mid()) {
             cmd.d_theta.setZero();         // reset previous optimal u
             l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
@@ -283,16 +290,16 @@ int main() {
           }
         }
         else if (phase == Phase::ARMED) {
-          if (sbus_frame.ch[7] != 1024) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
-            if (sbus_frame.ch[8] == 1024) {phase = Phase::IDLE;std::fprintf(stdout, "flight state -> [IDLE]\n"); std::fflush(stdout);}
+            if (ch8_changed && db_ch8.mid()) {phase = Phase::IDLE;std::fprintf(stdout, "flight state -> [IDLE]\n"); std::fflush(stdout);}
           }
         }
         else if (phase == Phase::IDLE) {
-          if (sbus_frame.ch[7] != 1024) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
-            if (sbus_frame.ch[8] != 1024) {
-              if(sbus_frame.ch[8] == 1360) {phase = Phase::RISING;std::fprintf(stdout, "flight state -> [RISING]\n"); std::fflush(stdout);}
+            if (ch8_changed && !db_ch8.mid()) {
+              if(db_ch8.high()) {phase = Phase::RISING;std::fprintf(stdout, "flight state -> [RISING]\n"); std::fflush(stdout);}
               else {std::fprintf(stdout, "\n\n You cannot turn back to [ARMED] phase in [IDLE] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
             }
           }

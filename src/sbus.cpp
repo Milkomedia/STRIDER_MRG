@@ -149,7 +149,9 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
 
   const uint8_t flags = f[23];
   if (flags & ~0x0F) return false;
-  for (int k = 0; k < 16; ++k) if (out_ch[k] < 200 || out_ch[k] > 2000) return false;
+  int tiny = 0;
+  for (int k = 0; k < 16; ++k) if (out_ch[k] < 100) tiny++;
+  if (tiny >= 3) return false;
 
   // digital channels (often used as ch17/ch18)
   out_ch[16] = (flags & 0x01) ? 2047 : 0;
@@ -157,6 +159,11 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
 
   const bool frame_lost = (flags & 0x04) != 0;
   const bool failsafe   = (flags & 0x08) != 0;
+
+    std::fprintf(stderr, "CH:");
+  for (int k = 0; k < 16; ++k)
+      std::fprintf(stderr, " %4u", (unsigned)out_ch[k]);
+  std::fprintf(stderr, "\n");
 
   if (failsafe) out_failsafe = 2;
   else if (frame_lost) out_failsafe = 1;

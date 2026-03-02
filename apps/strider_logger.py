@@ -17,7 +17,7 @@ import pyqtgraph as pg
 import numpy as np
 import math
 
-FC_THRUST_HZ = 0.1
+FC_THRUST_HZ = 1
 
 pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")

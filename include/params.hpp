@@ -8,25 +8,6 @@
 
 namespace param {
 
-// ===== Path planning Parameters =====
-static inline const Eigen::Vector3d DEFAULT_pos     = Eigen::Vector3d(0.0, -1.0, -1.0);
-
-// -----------------------------*-*-*-*-*-*-*-*-*-----------Pos_R
-//                          *   |
-//                    *         |  p(t) = p0 + Δp * (1 - cos(π t / T)) / 2
-//                *             |  v(t) = Δp * (π / (2T)) * sin(π t / T)
-//            *                 |  a(t) = Δp * (π² / (2T²)) * cos(π t / T)
-//         *                    |
-//       *                      |
-// -*-*<----- PATH_T_MOVE ---->-PATH_SETTLE_MAX->---Pos_L
-
-static inline const Eigen::Vector3d Pos_L             = Eigen::Vector3d(0.0, -1.0, -1.0);
-static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(0.0,  1.0, -1.0);
-static constexpr double DEFAULT_POS_TOL             = 0.01; // [m]
-static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
-static constexpr double PATH_T_MOVE                 = 1.50;
-static constexpr double PATH_SETTLE_MAX             = 1.50;
-
 enum class PathStage : uint8_t {
   HOLD_LEFT   = 0,
   MOVE_L2R    = 1,
@@ -64,7 +45,7 @@ static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable
 
 // ===== Butterworth cutoff frequencys =====
-static constexpr double GYRO_XY_CUTOFF_HZ = 30.0;
+static constexpr double GYRO_XY_CUTOFF_HZ = 20.0;
 static constexpr double GYRO_Z_CUTOFF_HZ   = 5.0;
 static constexpr double OPTI_VEL_CUTOFF_HZ = 4.0;
 
@@ -84,16 +65,16 @@ static constexpr double TILT_ANGLE_SAT      = 25.0 * M_PI / 180.0; // sequential
 
 // ===== SBUS command =====
 static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Z_RANGE       = 1.0;   // [m] k mapped to [ 0, -k]
+static constexpr double SBUS_Y_RANGE       = 2.0;   // [m] k mapped to [-k, +k]
+static constexpr double SBUS_Z_RANGE       = 1.2;   // [m] k mapped to [ 0, -k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
 static constexpr double SBUS_L_RANGE[2]    = { 0.46, 0.50};     // [m]
 static constexpr double SBUS_COTZ_RANGE[2] = {-0.21, -0.27};    // [m]
 static constexpr double SBUS_COTXY_RANGE[2] = {-0.047, 0.047};  // [m]
 
 // ===== OptiTrack offsets =====
-static constexpr double OPTI_X_OFFSET  = 0.000; // [m]
-static constexpr double OPTI_Y_OFFSET  = 0.645; // [m]
+static constexpr double OPTI_X_OFFSET  = -0.380; // [m] Opti perspective coordinate system
+static constexpr double OPTI_Y_OFFSET  = +0.430; // [m] Opti perspective coordinate system
 
 // ===== Control Frequencies =====
 static constexpr std::chrono::steady_clock::duration CTRL_DT       = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(2700)); // ~370Hz
@@ -135,6 +116,16 @@ static constexpr double B2BASE_ALPHA[4] = {M_PI, M_PI, M_PI, M_PI};
 static constexpr double B2BASE_A[4]     = {0.120, 0.120, 0.120, 0.120};
 static constexpr double DH_ARM_A[5]     = {0.1395, 0.115, 0.110, 0.024, 0.068};
 static constexpr double DH_ARM_ALPHA[5] = {M_PI/2.0, 0.0, 0.0, M_PI/2.0, 0.0};
+
+// ===== Path planning Parameters =====
+static inline const Eigen::Vector3d DEFAULT_pos       = Eigen::Vector3d(-OPTI_X_OFFSET, -1.25, -1.2);
+static inline const Eigen::Vector3d Pos_L             = Eigen::Vector3d(-OPTI_X_OFFSET, -1.25, -1.2);
+static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(-OPTI_X_OFFSET, +1.25, -1.2);
+
+static constexpr double DEFAULT_POS_TOL             = 0.01;  // [m]
+static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
+static constexpr double PATH_T_MOVE                 = 8.0;
+static constexpr double PATH_SETTLE_MAX             = 8.0;
 
 // ===== RT Scheduling & CPU IDs =====
 static constexpr int MAIN_PRIOR = 90;
