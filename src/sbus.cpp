@@ -24,10 +24,6 @@
 #include <asm/termbits.h>
 #include <linux/serial.h>
 
-#include <cinttypes>  // PRIu64
-#include <cmath>      // std::abs
-#include <algorithm>
-
 // Stop only; caller must join the owning std::thread before destroying this object.
 SBUS::~SBUS() {
   request_stop();
@@ -152,6 +148,8 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
   out_ch[15] = (uint16_t)(((b21 >> 5) | (b22 << 3)) & 0x07FF);
 
   const uint8_t flags = f[23];
+  if (flags & ~0x0F) return false;
+  for (int k = 0; k < 16; ++k) if (out_ch[k] < 200 || out_ch[k] > 2000) return false;
 
   // digital channels (often used as ch17/ch18)
   out_ch[16] = (flags & 0x01) ? 2047 : 0;
@@ -165,12 +163,6 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
   else out_failsafe = 0;
 
   return true;
-}
-
-static inline int sw3_class(uint16_t v) {
-  if (v < 700) return 0;       // LOW
-  if (v < 1400) return 1;      // MID
-  return 2;                    // HIGH
 }
 
 void SBUS::run() {
@@ -207,6 +199,7 @@ void SBUS::run() {
   size_t rx_len = 0;
 
   int lost_consecutive = 0;
+  int kill_consecutive = 0; 
   bool started = false;
 
   while (!stop_request_.load(std::memory_order_relaxed)) {
@@ -279,28 +272,10 @@ void SBUS::run() {
         continue;
       }
 
-      // Safety checks
-       if (fs == 2) {
-        ::close(fd);
-        stop_request_.store(true, std::memory_order_relaxed);
-        call_kill("[SBUS] FAILSAFE flag set");
-        break;
-      }
+      uint8_t raw25[25];
+      std::memcpy(raw25, rx.data() + i, 25);
 
-      if (fs == 1) {
-        lost_consecutive++;
-        if (lost_consecutive >= lost_consecutive_kill_) {
-          ::close(fd);
-          stop_request_.store(true, std::memory_order_relaxed);
-          call_kill("[SBUS] LOST flag persisted");
-          break;
-        }
-
-        i += 25;
-        continue;
-      } else {
-        lost_consecutive = 0;
-      }
+      // valid frame
       const uint64_t host_ns = now_steady_ns();
       SBUSFrame s;
       s.host_time_ns = host_ns;
@@ -317,9 +292,30 @@ void SBUS::run() {
       last_good_ns = host_ns;
       started = true;
 
-      if (s.ch[kill_chn_idx_] != arm_val_) {
+      // Safety checks
+      if (s.failsafe == 2) {
+        ::close(fd);
+        stop_request_.store(true, std::memory_order_relaxed);
+        call_kill("[SBUS] FAILSAFE flag set");
+        break;
+      }
+      if (s.failsafe == 1) {
+        lost_consecutive++;
+        if (lost_consecutive >= lost_consecutive_kill_) {
+          ::close(fd);
+          stop_request_.store(true, std::memory_order_relaxed);
+          call_kill("[SBUS] LOST flag persisted");
+          break;
+        }
+      }
+      else {lost_consecutive = 0;}
+
+      if (s.ch[kill_chn_idx_] > kill_thresh_) { kill_consecutive++;} 
+      else { kill_consecutive = 0;}
+
+      if (kill_consecutive >= kill_consecutive_kill_) {
         char msg[128];
-        std::snprintf(msg, sizeof(msg), "[SBUS] kill switch (ch[%d]=%u)", kill_chn_idx_, (unsigned)s.ch[kill_chn_idx_]);
+        std::snprintf(msg, sizeof(msg), "[SBUS] kill switch (ch[%d]=%u, cnt=%d)", kill_chn_idx_, (unsigned)s.ch[kill_chn_idx_], kill_consecutive);
         ::close(fd);
         stop_request_.store(true, std::memory_order_relaxed);
         call_kill(msg);

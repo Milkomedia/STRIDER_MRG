@@ -81,10 +81,11 @@ private:
 
   // Kill channel rule (0-based index)
   static constexpr int kill_chn_idx_ = 9;       // ch[9]
-  static constexpr uint16_t arm_val_ = 352;
+  static constexpr uint16_t kill_thresh_ = 900;
 
   // Lost frame rule
   static constexpr int lost_consecutive_kill_ = 30; // if lost flag persists, kill
+  static constexpr int kill_consecutive_kill_ = 3;
 };
 
 #endif // SBUS_H
