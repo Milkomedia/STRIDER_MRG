@@ -136,8 +136,10 @@ int main() {
 
   // --- sensor measurement filters ---
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
+  LPF acc_lpf[3]   = { LPF(param::ACC_LPF_CUTOFF_HZ),   LPF(param::ACC_LPF_CUTOFF_HZ),   LPF(param::ACC_LPF_CUTOFF_HZ)   };
   LPF gyro_xy_lpf[2] = { LPF(param::GYRO_XY_CUTOFF_HZ), LPF(param::GYRO_XY_CUTOFF_HZ) };
   Butter gyro_z_bf = Butter(param::GYRO_Z_CUTOFF_HZ);
+  LPF alpha_lpf[3] = { LPF(param::ALPHA_LPF_CUTOFF_HZ), LPF(param::ALPHA_LPF_CUTOFF_HZ), LPF(param::ALPHA_LPF_CUTOFF_HZ) };
 
   // --- other parameters ---
   Phase   phase = Phase::READY;
@@ -149,6 +151,7 @@ int main() {
   cmd.r4 = param::r4_init;
   Eigen::Vector3d prev_omega = Eigen::Vector3d::Zero();
   uint64_t prev_omega_ns = 0;
+  Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
 
   // --- MRG parameters ---
@@ -220,8 +223,16 @@ int main() {
         // s.omega(1) =  t265_frame.omega[0];
         s.omega(2) = gyro_z_bf.update(-t265_frame.omega[1], t265_frame.host_time_ns);
 
-        s.alpha = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns); prev_omega = s.omega; prev_omega_ns = t265_frame.host_time_ns;
+        // s.alpha = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns); prev_omega = s.omega; prev_omega_ns = t265_frame.host_time_ns;
 
+        if (prev_omega_ns == 0 || t265_frame.host_time_ns <= prev_omega_ns) { s.alpha.setZero(); } 
+        else {
+          const Eigen::Vector3d alpha_raw = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns);
+          s.alpha(0) = alpha_lpf[0].update(alpha_raw(0), t265_frame.host_time_ns); s.alpha(1) = alpha_lpf[1].update(alpha_raw(1), t265_frame.host_time_ns); s.alpha(2) = alpha_lpf[2].update(alpha_raw(2), t265_frame.host_time_ns);          
+        }
+
+        prev_omega = s.omega;
+        prev_omega_ns = t265_frame.host_time_ns;
         last_t265_cnt = cur_t265_cnt;
       }
     }
@@ -239,7 +250,13 @@ int main() {
         const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
         s.vel(0) = opti_vel_bf[0].update(vel_raw(0), opti_frame.host_time_ns); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), opti_frame.host_time_ns); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), opti_frame.host_time_ns);
 
-        s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
+        // s.acc = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
+
+        if (prev_time_ns == 0 || opti_frame.host_time_ns <= prev_time_ns) { s.acc.setZero(); }
+        else {
+          const Eigen::Vector3d acc_raw = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
+          s.acc(0) = acc_lpf[0].update(acc_raw(0), opti_frame.host_time_ns); s.acc(1) = acc_lpf[1].update(acc_raw(1), opti_frame.host_time_ns); s.acc(2) = acc_lpf[2].update(acc_raw(2), opti_frame.host_time_ns);
+        }
 
         last_opti_cnt = cur_opti_cnt;
       }

@@ -160,10 +160,9 @@ static bool decode_sbus_frame(const uint8_t* f, uint16_t out_ch[18], uint8_t& ou
   const bool frame_lost = (flags & 0x04) != 0;
   const bool failsafe   = (flags & 0x08) != 0;
 
-    std::fprintf(stderr, "CH:");
-  for (int k = 0; k < 16; ++k)
-      std::fprintf(stderr, " %4u", (unsigned)out_ch[k]);
-  std::fprintf(stderr, "\n");
+  // std::fprintf(stderr, "CH:");
+  // for (int k = 0; k < 16; ++k) std::fprintf(stderr, " %4u", (unsigned)out_ch[k]);
+  // std::fprintf(stderr, "\n");
 
   if (failsafe) out_failsafe = 2;
   else if (frame_lost) out_failsafe = 1;
