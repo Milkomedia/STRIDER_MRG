@@ -42,7 +42,7 @@ inline constexpr double COM_OFF_Y   = 0.0; // distance from the body frame to co
 inline constexpr double COT_2_COM_X = 0.523; // The rate at which CoM changes as the arm moves (x)
 inline constexpr double COT_2_COM_Y = 0.523; // The rate at which CoM changes as the arm moves (y)
 
-static constexpr double SATURATION_THRUST  = 1e12; // {(0.25*M*G) / 0.65} Maximum thrust per each propeller [N]
+static constexpr double SATURATION_THRUST  = 55.1546; // (95%) Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming

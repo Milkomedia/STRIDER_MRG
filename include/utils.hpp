@@ -504,9 +504,18 @@ static inline Eigen::Vector3d sbus_yaw_map(double& yaw_d, const uint16_t ch3) {
 }
 
 static inline double sbus_cot_map(const uint16_t ch_dial_raw) {
-    const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
+  const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
   static constexpr double cot_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1600.0;
   return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch_dial - 400) * cot_factor_;
+}
+
+static inline double sbus_saturation_thrust_map(const uint16_t ch_dial_raw) {
+  const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
+
+  static constexpr double thrust_min = 0.25 * param::M * param::G;
+  static constexpr double thrust_factor = (param::SATURATION_THRUST - thrust_min) / 1200.0;
+
+  return thrust_min + static_cast<double>(ch_dial - 400) * thrust_factor;
 }
 
 static inline bool sbus_path_edge(const uint16_t ch5, bool& prev_on) {
@@ -562,12 +571,11 @@ static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen
   if(setting_done) mode_changed = 0;
 }
 
-static inline void path_generator_LR(const std::chrono::steady_clock::time_point& now, const State& s, Command& cmd, const bool btn_edge, const double p_delta, const double t_delta) {
+static inline void path_generator_LR(const std::chrono::steady_clock::time_point& now, const State& s, Command& cmd, const bool btn_edge) {
   static param::PathStage stage = param::PathStage::HOLD_LEFT;
   static std::chrono::steady_clock::time_point move_t0;
 
-  const Eigen::Vector3d Pos_delta(0.0, p_delta, 0.0);
-  const double T_move = std::max(1e-6, param::PATH_T_MOVE + t_delta);
+  const double T_move = std::max(1e-6, param::PATH_T_MOVE);
 
   auto sine_pva = [&](const Eigen::Vector3d& p0, const Eigen::Vector3d& p1, const double tau, Eigen::Vector3d& p, Eigen::Vector3d& v, Eigen::Vector3d& a) {
     const Eigen::Vector3d dp = (p1 - p0);
@@ -594,9 +602,9 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
       const double dt  = std::chrono::duration<double>(now - move_t0).count();
       const double tau = std::clamp(dt / T_move, 0.0, 1.0);
 
-      sine_pva(param::Pos_L - Pos_delta, param::Pos_R + Pos_delta, tau, cmd.pos, cmd.vel, cmd.acc);
+      sine_pva(param::Pos_L, param::Pos_R, tau, cmd.pos, cmd.vel, cmd.acc);
 
-      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::Pos_R + Pos_delta, param::DEFAULT_POS_TOL)) {
+      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::Pos_R, param::DEFAULT_POS_TOL)) {
         stage = param::PathStage::HOLD_RIGHT;
       }
     } break;
@@ -612,9 +620,9 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
       const double dt  = std::chrono::duration<double>(now - move_t0).count();
       const double tau = std::clamp(dt / T_move, 0.0, 1.0);
 
-      sine_pva(param::Pos_R + Pos_delta, param::Pos_L - Pos_delta, tau, cmd.pos, cmd.vel, cmd.acc);
+      sine_pva(param::Pos_R, param::Pos_L, tau, cmd.pos, cmd.vel, cmd.acc);
 
-      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::Pos_L - Pos_delta, param::DEFAULT_POS_TOL)) {
+      if (tau >= 1.0 || dt >= param::PATH_SETTLE_MAX || is_near(s.pos, param::Pos_L, param::DEFAULT_POS_TOL)) {
         stage = param::PathStage::HOLD_LEFT;
       }
     } break;

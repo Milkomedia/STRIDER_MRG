@@ -153,6 +153,7 @@ int main() {
   uint64_t prev_omega_ns = 0;
   Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
+  double saturation_thrust = param::SATURATION_THRUST;
 
   // --- MRG parameters ---
   bool mpc_in_solving = false;
@@ -287,6 +288,13 @@ int main() {
             initial_gate = false;
             std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
           }
+
+          // changing arm position (only GAC_FLIGHT)
+          const Eigen::Vector3d bPcot(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
+          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
+          cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
+          cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
+          cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
         }
         else if (phase == Phase::MRG_NO_COT) {
           if (ch7_changed && db_ch7.mid()) {
@@ -321,31 +329,26 @@ int main() {
             }
           }
         }
-          
+        
+        // For path mode 
         const int PATH_ON = sbus_frame.ch[6] >= 1300 ? 1 : 0;
         const int mode_now = (phase == Phase::MRG_YES_COT || phase == Phase::MRG_NO_COT || PATH_ON) ? 1 : 0;
         const int mode_prev = last_mode;
         static int mode_changed = 0;
         if (mode_prev == 1 && mode_now == 0) mode_changed = 1;
         
+        // For Force constrain
+        saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10])
         if (mode_now != last_mode) {
           std::fprintf(stdout, mode_now ? "PATH generator ON\n" : "MANUAL mode ON\n");
           std::fflush(stdout);
         }
 
         if (mode_now) {
-          
           const bool btn_edge = sbus_path_edge(sbus_frame.ch[5], prev_btn);
-
           init_manual_to_path(s, cmd, initial_gate);
 
-          if (initial_gate) {
-            // double pos_delta = sbus_pos_map(sbus_frame.ch[10]); 
-            // double time_delta = sbus_time_map(sbus_frame.ch[11]); 
-            double pos_delta = 0.0; 
-            double time_delta = 0.0;
-            path_generator_LR(now, s, cmd, btn_edge, pos_delta, time_delta);
-          }
+          if (initial_gate) path_generator_LR(now, s, cmd, btn_edge);
           else prev_btn = btn_edge;
 
           if (initial_gate != last_gate) {
@@ -355,17 +358,10 @@ int main() {
           }
         }
         else {
-
-          const Eigen::Vector3d bPcot(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]), 0.0);
- 
           if (mode_changed) init_path_to_manual(s, cmd, bPcot, mode_changed);
           else {
             cmd.pos     = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
             cmd.heading = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]);
-            cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
-            cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
-            cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
-            cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
           }
           
           if (mode_now != last_mode) {
@@ -513,7 +509,7 @@ int main() {
 
     // --- thruster constraint ---
     Eigen::Vector4d thrust_cmd   = Eigen::Vector4d::Zero(); // (thrust_cmd > 0)
-    for (uint8_t i=0; i<4; ++i) {thrust_cmd(i) = std::clamp(thrust_des(i), 0.0, param::SATURATION_THRUST);}
+    for (uint8_t i=0; i<4; ++i) {thrust_cmd(i) = std::clamp(thrust_des(i), 0.0, saturation_thrust);}
 
     // --- get joint angle commands ---
     double q_d[20] = {0};
