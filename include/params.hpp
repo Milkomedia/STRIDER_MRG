@@ -16,20 +16,20 @@ enum class PathStage : uint8_t {
 };
 
 // ===== Geometry position control gain =====
-static constexpr double kX[3]  = {64.0, 64.0, 40.0};    // Position gain [x, y, z]
-static constexpr double kV[3]  = {24.3, 24.3, 21.0};    // Velocity gain [x, y, z]
+static constexpr double kX[3]  = {50.0, 50.0, 46.0};    // Position gain [x, y, z]
+static constexpr double kV[3]  = {19.0, 19.0, 32.0};    // Velocity gain [x, y, z]
 static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y, z]
 
 // ===== Geometry attitude control gain =====
-static constexpr double kR[3]  = {52.0, 52.0,  14.3}; // Rotational gain [roll, pitch, yaw]
-static constexpr double kW[3]  = {12.0, 12.0,  5.30}; // angular Velocity gain [roll, pitch, yaw]
+static constexpr double kR[3]  = {50.0, 50.0,  14.0}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kW[3]  = {11.0, 11.0,  5.50}; // angular Velocity gain [roll, pitch, yaw]
 static constexpr double kI     = 0.00;  // Integral gain for roll and pitch -> gaseggi しんで
-static constexpr double kyI    = 2.0;  // Integral gain for yaw
+static constexpr double kyI    = 0.0;  // Integral gain for yaw
 
 // ===== UAV Parameter =====
-static constexpr double Jx_bar = 0.068;   // Nominal : bar 0.068 + bat 0.2025 X 2 = 0.473 [kg m^2] 
-static constexpr double Jz_bar = 0.068;   // Nominal : bar 0.068 + bat 0.2025 X 2 = 0.473 [kg m^2]
-static constexpr double M_bar  = 0.7;     // Nominal : bar 0.675 + bat 1.0000 X 2 = 2.675 [Kg]
+static constexpr double Jx_bar = 0.138;  // Nominal : bar 0.068 + Mass 0.07 = 0.138 [kg m^2] 
+static constexpr double Jz_bar = 0.138;  // Nominal : bar 0.068 + Mass 0.07 = 0.138 [kg m^2]
+static constexpr double M_bar  = 1.0;   // Nominal : bar 0.460 + Mass 0.47    = 0.93 [Kg]
 
 static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
@@ -37,12 +37,12 @@ static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
 static constexpr double M  = 7.40 + M_bar;    // [kg]
 static constexpr double G  = 9.80665;         // [m/s^2] (must be positive)
 
-inline constexpr double COM_OFF_X   = 0.0; // distance from the body frame to com position (x) [m]
-inline constexpr double COM_OFF_Y   = 0.0; // distance from the body frame to com position (y) [m]
+inline constexpr double COM_OFF_X   = +0.00; // distance from the body frame to com position (x) [m]
+inline constexpr double COM_OFF_Y   = -0.03; // distance from the body frame to com position (y) [m]
 inline constexpr double COT_2_COM_X = 0.523; // The rate at which CoM changes as the arm moves (x)
 inline constexpr double COT_2_COM_Y = 0.523; // The rate at which CoM changes as the arm moves (y)
 
-static constexpr double SATURATION_THRUST  = 55.1546; // (95%) Maximum thrust per each propeller [N]
+static constexpr double SATURATION_THRUST  = 40; // (85%) Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
@@ -50,7 +50,7 @@ static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not
 
 // ===== Filter cutoff frequencys =====
 static constexpr double GYRO_XY_CUTOFF_HZ   = 30.0;
-static constexpr double GYRO_Z_CUTOFF_HZ    =  7.5;
+static constexpr double GYRO_Z_CUTOFF_HZ    =  5.0;
 static constexpr double ALPHA_LPF_CUTOFF_HZ =  5.0; // Not use in Controller (Only plot)
 static constexpr double OPTI_VEL_CUTOFF_HZ  =  4.0;
 static constexpr double ACC_LPF_CUTOFF_HZ   =  5.0; // Not use in Controller (Only plot)
@@ -71,12 +71,12 @@ static constexpr double TILT_ANGLE_SAT      = 25.0 * M_PI / 180.0; // sequential
 
 // ===== SBUS command =====
 static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Y_RANGE       = 2.0;   // [m] k mapped to [-k, +k]
+static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Z_RANGE       = 1.3;   // [m] k mapped to [ 0, -k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
 static constexpr double SBUS_L_RANGE[2]    = { 0.46, 0.50};     // [m]
 static constexpr double SBUS_COTZ_RANGE[2] = {-0.21, -0.27};    // [m]
-static constexpr double SBUS_COTXY_RANGE[2] = {-0.047, 0.047};  // [m]
+static constexpr double SBUS_COTXY_RANGE[2] = {-0.04, 0.00};  // [m]
 
 // ===== OptiTrack offsets =====
 static constexpr double OPTI_X_OFFSET  = -0.380; // [m] Opti perspective coordinate system
@@ -130,8 +130,8 @@ static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(-OPTI_X_
 
 static constexpr double DEFAULT_POS_TOL             = 0.01;  // [m]
 static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
-static constexpr double PATH_T_MOVE                 = 2.0;
-static constexpr double PATH_SETTLE_MAX             = 2.0;
+static constexpr double PATH_T_MOVE                 = 1.5;
+static constexpr double PATH_SETTLE_MAX             = 1.5;
 
 // ===== RT Scheduling & CPU IDs =====
 static constexpr int MAIN_PRIOR = 90;

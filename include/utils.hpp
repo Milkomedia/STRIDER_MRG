@@ -363,6 +363,7 @@ static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, doubl
 
 static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3d& r1, Eigen::Vector3d& r2, Eigen::Vector3d& r3, Eigen::Vector3d& r4) {
   std::array<Eigen::Vector3d*, 4> bparm = {&r1, &r2, &r3, &r4};
+  bpcot = Eigen::Vector3d::Zero();
 
   for (uint8_t i = 0; i < 4; ++i) {
     Eigen::Matrix4d T_i = Eigen::Matrix4d::Identity();
@@ -505,14 +506,14 @@ static inline Eigen::Vector3d sbus_yaw_map(double& yaw_d, const uint16_t ch3) {
 
 static inline double sbus_cot_map(const uint16_t ch_dial_raw) {
   const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
-  static constexpr double cot_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1600.0;
+  static constexpr double cot_factor_ = (param::SBUS_COTXY_RANGE[1] - param::SBUS_COTXY_RANGE[0]) / 1200.0;
   return param::SBUS_COTXY_RANGE[0] + static_cast<double>(ch_dial - 400) * cot_factor_;
 }
 
 static inline double sbus_saturation_thrust_map(const uint16_t ch_dial_raw) {
   const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
 
-  static constexpr double thrust_min = 0.25 * param::M * param::G;
+  static constexpr double thrust_min = 27.0;
   static constexpr double thrust_factor = (param::SATURATION_THRUST - thrust_min) / 1200.0;
 
   return thrust_min + static_cast<double>(ch_dial - 400) * thrust_factor;
@@ -536,37 +537,39 @@ static inline bool sbus_path_edge(const uint16_t ch5, bool& prev_on) {
 static inline void init_manual_to_path(const State& s, Command& cmd, bool& initial_gate) {
   if (initial_gate) return;
 
-  const bool setting_done =
-    is_near(cmd.pos, param::DEFAULT_pos, param::DEFAULT_POS_TOL) &&
-    is_near(s.r1,  param::r1_init,     param::DEFAULT_ARM_TOL) &&
-    is_near(s.r2,  param::r2_init,     param::DEFAULT_ARM_TOL) &&
-    is_near(s.r3,  param::r3_init,     param::DEFAULT_ARM_TOL) &&
-    is_near(s.r4,  param::r4_init,     param::DEFAULT_ARM_TOL);
+  // const bool setting_done =
+  //   is_near(cmd.pos, param::DEFAULT_pos, param::DEFAULT_POS_TOL) &&
+  //   is_near(s.r1,  param::r1_init,     param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r2,  param::r2_init,     param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r3,  param::r3_init,     param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r4,  param::r4_init,     param::DEFAULT_ARM_TOL);
+  const bool setting_done = is_near(cmd.pos, param::DEFAULT_pos, param::DEFAULT_POS_TOL);
 
   if (setting_done) { initial_gate = true; return; }
 
   cmd.pos = smooth(cmd.pos, param::DEFAULT_pos, 1.3);
-  cmd.r1  = smooth(cmd.r1,  param::r1_init,     0.5);
-  cmd.r2  = smooth(cmd.r2,  param::r2_init,     0.5);
-  cmd.r3  = smooth(cmd.r3,  param::r3_init,     0.5);
-  cmd.r4  = smooth(cmd.r4,  param::r4_init,     0.5);
+  // cmd.r1  = smooth(cmd.r1,  param::r1_init,     0.5);
+  // cmd.r2  = smooth(cmd.r2,  param::r2_init,     0.5);
+  // cmd.r3  = smooth(cmd.r3,  param::r3_init,     0.5);
+  // cmd.r4  = smooth(cmd.r4,  param::r4_init,     0.5);
 }
 
 static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen::Vector3d& bPcot, int& mode_changed) {
   if (!mode_changed) return;
 
   cmd.pos = smooth(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.3), 1.3);
-  cmd.r1 = smooth(cmd.r1,            param::r1_init + bPcot, 0.5);
-  cmd.r2 = smooth(cmd.r2,            param::r2_init + bPcot, 0.5);
-  cmd.r3 = smooth(cmd.r3,            param::r3_init + bPcot, 0.5);
-  cmd.r4 = smooth(cmd.r4,            param::r4_init + bPcot, 0.5);
+  // cmd.r1 = smooth(cmd.r1,            param::r1_init + bPcot, 0.5);
+  // cmd.r2 = smooth(cmd.r2,            param::r2_init + bPcot, 0.5);
+  // cmd.r3 = smooth(cmd.r3,            param::r3_init + bPcot, 0.5);
+  // cmd.r4 = smooth(cmd.r4,            param::r4_init + bPcot, 0.5);
 
-  const bool setting_done =
-    is_near(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.3), param::DEFAULT_POS_TOL) &&
-    is_near(s.r1,             param::r1_init + bPcot, param::DEFAULT_ARM_TOL) &&
-    is_near(s.r2,             param::r2_init + bPcot, param::DEFAULT_ARM_TOL) &&
-    is_near(s.r3,             param::r3_init + bPcot, param::DEFAULT_ARM_TOL) &&
-    is_near(s.r4,             param::r4_init + bPcot, param::DEFAULT_ARM_TOL);
+  // const bool setting_done =
+  //   is_near(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.3), param::DEFAULT_POS_TOL) &&
+  //   is_near(s.r1,             param::r1_init + bPcot, param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r2,             param::r2_init + bPcot, param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r3,             param::r3_init + bPcot, param::DEFAULT_ARM_TOL) &&
+  //   is_near(s.r4,             param::r4_init + bPcot, param::DEFAULT_ARM_TOL);
+  const bool setting_done = is_near(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.3), param::DEFAULT_POS_TOL);
 
   if(setting_done) mode_changed = 0;
 }
@@ -584,8 +587,9 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
     const double c_ = std::cos(th);
 
     p = p0 + dp * (0.5 * (1.0 - c_));
-    v = dp * (0.5 * (M_PI / T_move) * s_);
+    // v = dp * (0.5 * (M_PI / T_move) * s_);
     // a = dp * (0.5 * (M_PI / T_move) * (M_PI / T_move) * c_);
+    v = Eigen::Vector3d(0.0, 0.0, 0.0);
     a = Eigen::Vector3d(0.0, 0.0, 0.0);
   };
 

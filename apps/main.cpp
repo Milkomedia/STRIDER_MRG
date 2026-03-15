@@ -138,7 +138,7 @@ int main() {
   Butter opti_vel_bf[3] = {Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ), Butter(param::OPTI_VEL_CUTOFF_HZ)};
   LPF acc_lpf[3]   = { LPF(param::ACC_LPF_CUTOFF_HZ),   LPF(param::ACC_LPF_CUTOFF_HZ),   LPF(param::ACC_LPF_CUTOFF_HZ)   };
   LPF gyro_xy_lpf[2] = { LPF(param::GYRO_XY_CUTOFF_HZ), LPF(param::GYRO_XY_CUTOFF_HZ) };
-  Butter gyro_z_bf = Butter(param::GYRO_Z_CUTOFF_HZ);
+  LPF gyro_z_bf = LPF(param::GYRO_Z_CUTOFF_HZ);
   LPF alpha_lpf[3] = { LPF(param::ALPHA_LPF_CUTOFF_HZ), LPF(param::ALPHA_LPF_CUTOFF_HZ), LPF(param::ALPHA_LPF_CUTOFF_HZ) };
 
   // --- other parameters ---
@@ -154,6 +154,7 @@ int main() {
   Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
   double saturation_thrust = param::SATURATION_THRUST;
+  Eigen::Vector3d bPcot = Eigen::Vector3d::Zero();
 
   // --- MRG parameters ---
   bool mpc_in_solving = false;
@@ -288,13 +289,6 @@ int main() {
             initial_gate = false;
             std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
           }
-
-          // changing arm position (only GAC_FLIGHT)
-          const Eigen::Vector3d bPcot(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
-          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
-          cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
-          cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
-          cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
         }
         else if (phase == Phase::MRG_NO_COT) {
           if (ch7_changed && db_ch7.mid()) {
@@ -329,6 +323,15 @@ int main() {
             }
           }
         }
+
+        // changing arm position (only GAC_FLIGHT)
+        if(phase == Phase::GAC_FLIGHT || phase == Phase::ARMED || phase == Phase::IDLE) {
+          bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
+          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
+          cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
+          cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
+          cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
+        }
         
         // For path mode 
         const int PATH_ON = sbus_frame.ch[6] >= 1300 ? 1 : 0;
@@ -338,7 +341,8 @@ int main() {
         if (mode_prev == 1 && mode_now == 0) mode_changed = 1;
         
         // For Force constrain
-        saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10])
+        saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10]);
+
         if (mode_now != last_mode) {
           std::fprintf(stdout, mode_now ? "PATH generator ON\n" : "MANUAL mode ON\n");
           std::fflush(stdout);
