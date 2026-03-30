@@ -326,7 +326,7 @@ int main() {
 
         // changing arm position (only GAC_FLIGHT)
         if(phase == Phase::GAC_FLIGHT || phase == Phase::ARMED || phase == Phase::IDLE) {
-          bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
+          bPcot = Eigen::Vector3d(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]), 0.0);
           cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
           cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
           cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
@@ -387,8 +387,10 @@ int main() {
       if (dxl.read_latest(dxl_frame)) {
         for(uint8_t i = 0; i < 20; ++i) {s.arm_q[i] = dxl_frame.q_mea[i];}
         FK(s.arm_q, s.r_cot, s.r1, s.r2, s.r3, s.r4);
-        s.r_com(0) = param::COM_OFF_X + param::COT_2_COM_X * s.r_cot(0);
-        s.r_com(1) = param::COM_OFF_Y + param::COT_2_COM_Y * s.r_cot(1);
+        const Eigen::Vector2d r_com_xy = com_estimator(s.arm_q);
+        s.r_com(0) = r_com_xy(0);
+        s.r_com(1) = r_com_xy(1);
+        printf("[COM] x: %.4f | %.4f  y: %.4f | %.4f\n ", s.r_com(0), s.r_com(0)/s.r_cot(0), s.r_com(1), s.r_com(1)/s.r_cot(1));
         last_dxl_cnt = cur_dxl_cnt;
       }
     }

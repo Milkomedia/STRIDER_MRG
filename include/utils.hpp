@@ -375,6 +375,43 @@ static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3
   bpcot *= 0.25;
 }
 
+static inline Eigen::Vector2d com_estimator(const double arm_q[20]) {
+  Eigen::Vector2d moment = Eigen::Vector2d::Zero();
+
+  double M_link = 0.0;
+  for (int i = 0; i < 5; i++) M_link += param::M_link[i];
+
+  const double M_total = param::M_body + 4.0 * M_link;
+
+  for (int arm = 0; arm < 4; ++arm) {
+    int k = 5 * arm;
+
+    const double q1 = arm_q[k];
+    const double q2 = arm_q[k+1];
+    const double q3 = arm_q[k+2];
+    const double phi = param::B2BASE_THETA[arm] - q1;
+
+    const double c2  = std::cos(q2);
+    const double c23 = std::cos(q2 + q3);
+
+    const double x1   = param::D_LINK[0];
+    const double x2   = param::DH_ARM_A[0] + param::D_LINK[1] * c2;
+    const double x3   = param::DH_ARM_A[0] + param::DH_ARM_A[1] * c2 + param::D_LINK[2] * c23;
+    const double xTip = param::DH_ARM_A[0] + param::DH_ARM_A[1] * c2 + param::DH_ARM_A[2] * c23;
+
+    const double moment_rho = param::M_link[0] * x1 + param::M_link[1] * x2 + param::M_link[2] * x3 + (param::M_link[3] + param::M_link[4]) * xTip;
+
+    moment(0) += M_link * param::B2BASE_A[arm] * std::cos(param::B2BASE_THETA[arm]) + moment_rho * std::cos(phi);
+    moment(1) += M_link * param::B2BASE_A[arm] * std::sin(param::B2BASE_THETA[arm]) + moment_rho * std::sin(phi);
+  }
+
+  Eigen::Vector2d r_com = moment / M_total;
+  r_com(0) += param::COM_OFF_X;
+  r_com(1) += param::COM_OFF_Y;
+
+  return r_com;
+}
+
 // --------- [ Control Allocation ] ---------
 static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Vector3d& tau_d, double& tauz_bar, const double arm_q[20], const Eigen::Vector3d& Pc, Eigen::Vector4d& C1_des, Eigen::Vector4d& C2_des) {
 
