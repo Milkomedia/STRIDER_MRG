@@ -9,34 +9,41 @@ from pathlib import Path
 
 def build_model():
     model = AcadosModel()
-    model.name = "no_cot_MRG"
+    model.name = "use_delta"
 
     # Model state
     theta           = ca.SX.sym('theta',  3) # [rad]
     omega           = ca.SX.sym('omega',  3) # [rad/s]
-    delta_theta_cmd = ca.SX.sym('delta_theta_cmd',  3) # [rad], Augmented state(command input)
-    x     = ca.vertcat(theta, omega, delta_theta_cmd)
+    x     = ca.vertcat(theta, omega)
     x_dot = ca.SX.sym('x_dot', x.size1())
     model.x = x
     model.xdot = x_dot
 
-    # Model control input(u-rate)
-    u_rate = ca.SX.sym('u_rate', 3) # delta_theta_cmd_rate [rad/s]
-    model.u = u_rate
+    # Model control input(u)
+    delta_theta_cmd = ca.SX.sym('delta_theta_cmd', 3) # [rad]
+    model.u = delta_theta_cmd
 
     # Model parameter
-    R_raw = ca.SX.sym('R_raw', 3, 3) # desired attitude SO3 matrix
-    omega_raw = ca.SX.sym('omega_raw', 3) # desired angular rate [rad/s]
-    T_des = ca.SX.sym('T_des')       # [N]
-    model.p  = ca.vertcat(ca.reshape(R_raw, 9, 1), omega_raw, T_des)
+    R_raw = ca.SX.sym('R_raw', 3, 3)    # desired attitude SO3 matrix
+    W_raw = ca.SX.sym('W_raw', 3)       # desired angular rate [rad/s]
+    Wdot_raw = ca.SX.sym('Wdot_raw', 3) # desired angular accel [rad/s^2]
+    R_0   = ca.SX.sym('R_0', 3, 3)      # initial attitude SO3 matrix
+    f_0 = ca.SX.sym('f_0')              # [N]
+    model.p  = ca.vertcat(ca.reshape(R_raw, 9, 1), W_raw, Wdot_raw, ca.reshape(R_0, 9, 1), f_0)
 
     # Constants
     J = ca.DM(p.J_TENSOR)
     J_inv = ca.inv(J)
-    zeta = p.ZETA
-    KR = ca.DM(p.KR).reshape((3, 1))
-    KW = ca.DM(p.KW).reshape((3, 1))
-    l = p.L_DIST
+    zeta = float(p.ZETA)
+    KR = ca.reshape(ca.DM(np.asarray(p.KR, dtype=np.float64)), 3, 1)
+    KW = ca.reshape(ca.DM(np.asarray(p.KW, dtype=np.float64)), 3, 1)
+    l = float(p.L_DIST)
+    b_F0 = ca.vertcat(0.0, 0.0, -f_0)
+    g_F0 = R_0 @ b_F0
+
+    m_link = ca.reshape(ca.DM(np.asarray(p.M_LINK, dtype=np.float64)), 5, 1)
+    inv_m_tot = 1.0 / (ca.DM(float(p.M_CENTER)) + 4.0 * ca.sum1(m_link))
+    center_body_com = ca.vertcat(float(p.COM_BIAS_OF_LOAD), 0.0)
 
     # ---------- math utils ----------
     def euler_zyx_to_R(theta: ca.SX) -> ca.SX:
@@ -95,27 +102,28 @@ def build_model():
 
     # angular rate (omega)
     R = euler_zyx_to_R(theta)  # (body->global)
-    R_d = R_raw @ expm_hat(delta_theta_cmd)
-    RtRd = R.T @ R_d
+    Rd = R_raw @ expm_hat(delta_theta_cmd)
+    Wd = expm_hat(-delta_theta_cmd) @ W_raw
+    Wd_dot = expm_hat(-delta_theta_cmd) @ Wdot_raw
+    RtRd = R.T @ Rd
     e_R = 0.5 * vee(RtRd.T - RtRd)
-    e_w = omega - RtRd @ omega_raw
-    tau_d = - KR * e_R - KW * e_w
-    omega_dot = J_inv @ (tau_d - ca.cross(omega, J @ omega))
+    e_w = omega - RtRd @ Wd
+    tau_d = - KR * e_R - KW * e_w + J@(hat(omega)@RtRd@Wd + RtRd@Wd_dot)
+    omega_dot = J_inv@(tau_d - ca.cross(omega, J@omega))
 
-    # Augmented dynamics
-    u_cmd_dot = u_rate
-
-    f_expl = ca.vertcat(theta_dot, omega_dot, u_cmd_dot)
+    f_expl = ca.vertcat(theta_dot, omega_dot)
     model.f_expl_expr = f_expl
     model.f_impl_expr = x_dot - f_expl
 
     # ---------- Propeller thrust expression ----------
-    A = ca.vertcat(ca.horzcat( l,  l, -l, -l),
-                   ca.horzcat( l, -l, -l,  l),
+    pc = center_body_com * inv_m_tot
+    A = ca.vertcat(ca.horzcat( l+pc[1],  l+pc[1], -l+pc[1], -l+pc[1]),
+                   ca.horzcat( l-pc[0], -l-pc[0], -l-pc[0],  l-pc[0]),
                    ca.horzcat(-zeta,  zeta, -zeta,  zeta),
                    ca.horzcat( -1.0,  -1.0,  -1.0,  -1.0))
 
-    w_d = ca.vertcat(tau_d, T_des)
+    b_F = R.T @ g_F0
+    w_d = ca.vertcat(tau_d, b_F[2])
     F_expr = ca.solve(A, w_d)
     model.con_h_expr   = F_expr
 
@@ -132,31 +140,24 @@ def build_ocp():
     ocp.solver_options.tf        = p.N * p.DT
 
     # ---------- costs ----------
-    omega           = model.x[3:6]
-    delta_theta_cmd = model.x[6:9]
-    delta_theta_cmd_rate = model.u[0:3]
+    delta_theta_cmd = model.u
     
-    model.cost_y_expr   = ca.vertcat(omega, delta_theta_cmd, delta_theta_cmd_rate) # 1~k-1 ref
-    model.cost_y_expr_e = ca.vertcat(omega, delta_theta_cmd) # terminal(k) ref
+    model.cost_y_expr   = ca.vertcat(delta_theta_cmd) # 1~k-1 ref
 
-    ocp.dims.ny   = 13
-    ocp.dims.ny_e = 10
+    ocp.dims.ny   = 3
     
-    ocp.cost.W = np.diag(np.concatenate([c.Q_OMEGA, c.Q_THETA, c.R_THETA]).astype(np.float64))
-    ocp.cost.W_e = np.diag(np.concatenate([c.Q_OMEGA, c.Q_THETA]).astype(np.float64))
+    ocp.cost.W = np.diag(np.asarray(c.Q_THETA, dtype=np.float64))
 
     ocp.cost.cost_type   = "NONLINEAR_LS"
-    ocp.cost.cost_type_e = "NONLINEAR_LS"
 
     # cost reference default value
     ocp.cost.yref   = np.zeros((model.cost_y_expr.size()[0],))
-    ocp.cost.yref_e = np.zeros((model.cost_y_expr_e.size()[0],))
     ocp.parameter_values = np.zeros((model.p.size()[0],))
     ocp.constraints.x0 = np.zeros(model.x.size()[0])
 
     # ---------- h_expr constraints ----------
-    ocp.constraints.lh   = c.F_MIN
-    ocp.constraints.uh   = c.F_MAX
+    ocp.constraints.lh   = np.asarray(c.F_MIN, dtype=np.float64)
+    ocp.constraints.uh   = np.asarray(c.F_MAX, dtype=np.float64)
     ocp.dims.nh   = 4
 
     # ---------- solver options ----------

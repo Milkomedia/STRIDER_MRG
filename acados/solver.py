@@ -1,7 +1,7 @@
 from acados_template.acados_ocp_solver import AcadosOcpSolver
 
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Optional
 import time
 
 # debugging
@@ -15,239 +15,368 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 class StriderNMPC:
-    def __init__(self):
-        # 1. build "NO-COT"
-        from .no_cot.model import build_ocp as no_cot_build_ocp
-        self.no_cot_ocp  = no_cot_build_ocp()
-        no_cot_json_path  = BASE_DIR / "no_cot" / f"{self.no_cot_ocp.model.name}.json"
-        self.no_cot_solver  = AcadosOcpSolver(self.no_cot_ocp, json_file=str(no_cot_json_path))
+  def __init__(self):
+    # Build USE-DELTA solver.
+    from .use_delta.model import build_ocp as use_delta_build_ocp
+    self.use_delta_ocp = use_delta_build_ocp()
+    use_delta_json_path = BASE_DIR / "use_delta" / f"{self.use_delta_ocp.model.name}.json"
+    self.use_delta_solver = AcadosOcpSolver(self.use_delta_ocp, json_file=str(use_delta_json_path))
 
-        self.no_cot_nx = self.no_cot_ocp.model.x.size()[0]
-        self.no_cot_nu = self.no_cot_ocp.model.u.size()[0]
-        self.no_cot_np = self.no_cot_ocp.model.p.size()[0]
+    self.use_delta_nx = int(self.use_delta_ocp.model.x.size()[0])
+    self.use_delta_nu = int(self.use_delta_ocp.model.u.size()[0])
+    self.use_delta_np = int(self.use_delta_ocp.model.p.size()[0])
 
-        # 2. build "YES-COT"
-        from .yes_cot.model import build_ocp as yes_cot_build_ocp
-        self.yes_cot_ocp = yes_cot_build_ocp()
-        yes_cot_json_path = BASE_DIR / "yes_cot"  / f"{self.yes_cot_ocp.model.name}.json"
-        self.yes_cot_solver = AcadosOcpSolver(self.yes_cot_ocp, json_file=str(yes_cot_json_path))
+    # Build USE-ARM solver.
+    from .use_arm.model import build_ocp as use_arm_build_ocp
+    self.use_arm_ocp = use_arm_build_ocp()
+    use_arm_json_path = BASE_DIR / "use_arm" / f"{self.use_arm_ocp.model.name}.json"
+    self.use_arm_solver = AcadosOcpSolver(self.use_arm_ocp, json_file=str(use_arm_json_path))
 
-        self.yes_cot_nx = self.yes_cot_ocp.model.x.size()[0]
-        self.yes_cot_nu = self.yes_cot_ocp.model.u.size()[0]
-        self.yes_cot_np = self.yes_cot_ocp.model.p.size()[0]
+    self.use_arm_nx = int(self.use_arm_ocp.model.x.size()[0])
+    self.use_arm_nu = int(self.use_arm_ocp.model.u.size()[0])
+    self.use_arm_np = int(self.use_arm_ocp.model.p.size()[0])
 
-        # 3. generate mmap logger
-        from . import params as p
-        self.N = int(p.N)
+    # Build USE-FULL solver.
+    from .use_full.model import build_ocp as use_full_build_ocp
+    self.use_full_ocp = use_full_build_ocp()
+    use_full_json_path = BASE_DIR / "use_full" / f"{self.use_full_ocp.model.name}.json"
+    self.use_full_solver = AcadosOcpSolver(self.use_full_ocp, json_file=str(use_full_json_path))
 
-        mmap_path = os.environ.get("MRG_MMAP", "/tmp/MRG_debug.mmap")
-        self._mmap_writer = MMapWriter(mmap_path, self.N, self.yes_cot_nx, self.yes_cot_nu, self.yes_cot_np)
+    self.use_full_nx = int(self.use_full_ocp.model.x.size()[0])
+    self.use_full_nu = int(self.use_full_ocp.model.u.size()[0])
+    self.use_full_np = int(self.use_full_ocp.model.p.size()[0])
 
-        # 4. RT-oriented buffers (our glue code by reusing fixed-size buffers per tick)
+    from . import params as p
+    self.N = int(p.N)
 
-        # Full-horizon debug buffers for mmap (C-contiguous)
-        self._xs_yes = np.empty((self.N + 1, self.yes_cot_nx), dtype=np.float64)
-        self._us_yes = np.empty((self.N,     self.yes_cot_nu), dtype=np.float64)
-        self._ps_yes = np.empty((self.N + 1, self.yes_cot_np), dtype=np.float64)
+    mmap_path = os.environ.get("MRG_MMAP", "/tmp/MRG_debug.mmap")
+    self._mmap_writer = MMapWriter(
+      mmap_path,
+      self.N,
+      self.use_full_nx,
+      self.use_full_nu,
+      self.use_full_np,
+    )
 
-        # no_cot results upcasted to yes_cot dims for mmap (C-contiguous)
-        self._xs_up  = np.empty((self.N + 1, self.yes_cot_nx), dtype=np.float64)
-        self._us_up  = np.zeros((self.N,     self.yes_cot_nu), dtype=np.float64)
-        self._ps_up  = np.empty((self.N + 1, self.yes_cot_np), dtype=np.float64)
+    # Full-layout horizon buffers for mmap/debug output.
+    self._xs_full = np.zeros((self.N + 1, self.use_full_nx), dtype=np.float64)
+    self._us_full = np.zeros((self.N, self.use_full_nu), dtype=np.float64)
+    self._ps_full = np.zeros((self.N + 1, self.use_full_np), dtype=np.float64)
 
-        # Per-call step outputs (Fortran-order helps Eigen column-major mapping)
-        self._u_opt_steps  = np.empty((self.yes_cot_nu, self.N), dtype=np.float64, order="F")
-        self._u_rate_steps = np.empty((self.yes_cot_nu, self.N), dtype=np.float64, order="F")
+    # Upcast buffers for reduced solvers.
+    self._xs_up = np.zeros((self.N + 1, self.use_full_nx), dtype=np.float64)
+    self._us_up = np.zeros((self.N, self.use_full_nu), dtype=np.float64)
+    self._ps_up = np.zeros((self.N + 1, self.use_full_np), dtype=np.float64)
 
-        # no_cot down-projection buffers (avoid np.concatenate/copy every tick).
-        self._x0_no = np.empty((self.no_cot_nx,), dtype=np.float64)
-        self._u0_no = np.empty((self.no_cot_nu,), dtype=np.float64)
-        
-        # no_cot param buffer (for size mismatch safety)
-        self._p_no  = np.empty((self.no_cot_np,), dtype=np.float64)
+    # Returned stage-wise outputs.
+    self._u_opt_steps = np.zeros((self.use_full_nu, self.N), dtype=np.float64, order="F")
+    self._u_stage_steps = np.zeros((self.use_full_nu, self.N), dtype=np.float64, order="F")
 
-        # Cached holds for no_cot upcast (avoid per-tick small allocations).
-        self._last_r_rotor     = np.zeros(8, dtype=np.float64)
-        self._last_r_rotor_cmd = np.zeros(8, dtype=np.float64)
-    
-    def no_cot_solve(self, x_0, u_0, p, steps_req: int):
-        x_full = np.asarray(x_0, dtype=np.float64).ravel()
-        u_full = np.asarray(u_0, dtype=np.float64).ravel()
+    # Reduced-model initial-condition buffers.
+    self._x0_delta = np.zeros((self.use_delta_nx,), dtype=np.float64)
+    self._u0_delta = np.zeros((self.use_delta_nu,), dtype=np.float64)
 
-        # Cache holds for no_cot -> yes_cot upcast
-        self._last_r_rotor[:]     = x_full[6:14]
-        self._last_r_rotor_cmd[:] = x_full[17:25]
+    self._x0_arm = np.zeros((self.use_arm_nx,), dtype=np.float64)
+    self._u0_arm = np.zeros((self.use_arm_nu,), dtype=np.float64)
 
-        # Down-project yes_cot packet -> no_cot dimensions
-        # no_cot x: [theta(0:3), omega(3:6), delta_theta_cmd(6:9)]
-        self._x0_no[0:6] = x_full[0:6]
-        self._x0_no[6:9] = x_full[14:17]
-        # no_cot u: [delta_theta_cmd_rate(0:3)]
-        self._u0_no[0:3] = u_full[0:3]
-        p = np.asarray(p, dtype=np.float64).ravel()
+    # Cached rotor states for upcasting use_delta solutions.
+    self._last_r_rotor = np.zeros(8, dtype=np.float64)
+    self._last_r_rotor_cmd = np.zeros(8, dtype=np.float64)
 
-        # initial state condition (equality constraint)
-        self.no_cot_solver.set(0, "lbx", self._x0_no)
-        self.no_cot_solver.set(0, "ubx", self._x0_no)
+  def _set_initial_guess_all_stages(
+    self,
+    solver: AcadosOcpSolver,
+    x0: np.ndarray,
+    u0: np.ndarray,
+    p0: np.ndarray,
+  ) -> None:
+    solver.set(0, "lbx", x0)
+    solver.set(0, "ubx", x0)
 
-        for k in range(self.N + 1):
-            self.no_cot_solver.set(k, "x", self._x0_no)  # initial guess
-            self.no_cot_solver.set(k, "p", p)            # feed parameter
+    for k in range(self.N + 1):
+      solver.set(k, "x", x0)
+      solver.set(k, "p", p0)
 
-        for k in range(self.N):
-            self.no_cot_solver.set(k, "u", self._u0_no)  # initial guess
+    for k in range(self.N):
+      solver.set(k, "u", u0)
 
-        # Solve
-        t0 = time.perf_counter()
-        status = self.no_cot_solver.solve()
-        solve_ms = (time.perf_counter() - t0) * 1000.0
-        
-        # Extract full-horizon (for mmap) and requested steps in one pass.
-        xs, us, ps = self._extract_all_xup(
-            cot_using=False,
-            steps_req=steps_req,
-            u_opt_out=self._u_opt_steps,
-            u_rate_out=self._u_rate_steps,
-        )
-        
-        self._mmap_writer.write(
-            x_all=xs,
-            u_all=us,
-            p_all=ps,
-            solve_ms=float(solve_ms),
-            status=int(status),
-        )
+  def _reset_output_steps(
+    self,
+    steps_req: int,
+    u_opt_out: Optional[np.ndarray],
+    u_stage_out: Optional[np.ndarray],
+  ) -> None:
+    if steps_req < 0 or steps_req > self.N:
+      raise ValueError(f"steps_req out of range: got {steps_req}, valid=[0, {self.N}]")
 
-        return self._u_opt_steps[:, 0:steps_req], self._u_rate_steps[:, 0:steps_req], float(solve_ms), int(status)
+    if u_opt_out is not None:
+      u_opt_out.fill(0.0)
+    if u_stage_out is not None:
+      u_stage_out.fill(0.0)
 
-    def yes_cot_solve(self, x_0, u_0, p, steps_req: int):
-        x_0   = np.asarray(x_0,   dtype=np.float64).ravel()
-        u_0   = np.asarray(u_0,   dtype=np.float64).ravel()
-        p     = np.asarray(p,     dtype=np.float64).ravel()
+  def _finalize_solve(
+    self,
+    xs: np.ndarray,
+    us: np.ndarray,
+    ps: np.ndarray,
+    solve_ms: float,
+    status: int,
+    steps_req: int,
+  ) -> Tuple[np.ndarray, np.ndarray, float, int]:
+    self._mmap_writer.write(
+      x_all=xs,
+      u_all=us,
+      p_all=ps,
+      solve_ms=float(solve_ms),
+      status=int(status),
+    )
+    return (
+      self._u_opt_steps[:, 0:steps_req],
+      self._u_stage_steps[:, 0:steps_req],
+      float(solve_ms),
+      int(status),
+    )
 
-        # initial state condition (equality constraint)
-        self.yes_cot_solver.set(0, "lbx", x_0)
-        self.yes_cot_solver.set(0, "ubx", x_0)
+  def use_delta_solve(self, x_0, u_0, p, steps_req: int):
+    x_full = np.asarray(x_0, dtype=np.float64).ravel()
+    u_full = np.asarray(u_0, dtype=np.float64).ravel()
+    p = np.asarray(p, dtype=np.float64).ravel()
 
-        for k in range(self.N + 1):
-            self.yes_cot_solver.set(k, "x", x_0)  # initial guess
-            self.yes_cot_solver.set(k, "p", p)    # feed parameter
+    # Full x layout:
+    # [theta(0:3), omega(3:6), r_rotor(6:14), r_rotor_cmd(14:22)]
+    self._last_r_rotor[:] = x_full[6:14]
+    self._last_r_rotor_cmd[:] = x_full[14:22]
 
-        for k in range(self.N):
-            self.yes_cot_solver.set(k, "u", u_0)  # initial guess
+    # use_delta x = [theta(0:3), omega(3:6)]
+    self._x0_delta[:] = x_full[0:6]
 
-        # Solve
-        t0 = time.perf_counter()
-        status = self.yes_cot_solver.solve()
-        solve_ms = (time.perf_counter() - t0) * 1000.0
+    # use_delta u = [delta_theta_cmd(0:3)]
+    self._u0_delta[:] = u_full[0:3]
 
-        # Extract full-horizon (for mmap) and requested steps in one pass.
-        xs, us, ps = self._extract_all_xup(
-            cot_using=True,
-            steps_req=steps_req,
-            u_opt_out=self._u_opt_steps,
-            u_rate_out=self._u_rate_steps,
-        )
+    self._set_initial_guess_all_stages(self.use_delta_solver, self._x0_delta, self._u0_delta, p)
 
-        self._mmap_writer.write(
-            x_all=xs,
-            u_all=us,
-            p_all=ps,
-            solve_ms=float(solve_ms),
-            status=int(status),
-        )
+    t0 = time.perf_counter()
+    status = self.use_delta_solver.solve()
+    solve_ms = (time.perf_counter() - t0) * 1000.0
 
-        return self._u_opt_steps[:, 0:steps_req], self._u_rate_steps[:, 0:steps_req], float(solve_ms), int(status)
-    
-    def compute_MPC(self, mpci: Dict[str, Any]) -> Dict[str, Any]:
-        x_0    = np.asarray(mpci.get("x_0", np.zeros(self.yes_cot_nx)), dtype=np.float64).ravel()
-        u_0    = np.asarray(mpci.get("u_0", np.zeros(self.yes_cot_nu)), dtype=np.float64).ravel()
-        p      = np.asarray(mpci.get("p",   np.zeros(self.yes_cot_np)), dtype=np.float64).ravel()
-        cot_using = bool(mpci.get("use_cot", False))
+    xs, us, ps = self._extract_all_xup(
+      full_model_using=False,
+      arm_model_using=False,
+      steps_req=steps_req,
+      u_opt_out=self._u_opt_steps,
+      u_stage_out=self._u_stage_steps,
+    )
 
-        steps_req = int(mpci.get("steps_req", 1))
-        if steps_req > self.N: raise ValueError(f"steps_req too large: got {steps_req}, solver horizon N={self.N}")
+    return self._finalize_solve(xs, us, ps, solve_ms, status, steps_req)
 
-        if x_0.size != self.yes_cot_nx: raise ValueError(f"x_0 size mismatch: got {x_0.size}, expected {self.yes_cot_nx}")
-        if p.size != self.yes_cot_np: raise ValueError(f"p size mismatch: got {p.size}, expected {self.yes_cot_np}")
-        if u_0.size != self.yes_cot_nu: u_0 = np.zeros(self.yes_cot_nu, dtype=np.float64)
+  def use_arm_solve(self, x_0, u_0, p, steps_req: int):
+    x_full = np.asarray(x_0, dtype=np.float64).ravel()
+    u_full = np.asarray(u_0, dtype=np.float64).ravel()
+    p = np.asarray(p, dtype=np.float64).ravel()
 
-        if cot_using: u_opt_steps, u_rate_steps, solve_ms, status = self.yes_cot_solve(x_0, u_0, p, steps_req)
-        else: u_opt_steps, u_rate_steps, solve_ms, status = self.no_cot_solve(x_0, u_0, p, steps_req)
+    # use_arm x = [theta(0:3), omega(3:6), r_rotor(6:14), r_rotor_cmd(14:22)]
+    self._x0_arm[0:6] = x_full[0:6]
+    self._x0_arm[6:14] = x_full[6:14]
+    self._x0_arm[14:22] = x_full[14:22]
 
-        return {"u_opt": u_opt_steps, "u_rate": u_rate_steps, "solve_ms": float(solve_ms), "state": int(status),}
+    # use_arm u = [r_rotor_cmd_rate(0:8)]
+    self._u0_arm[:] = u_full[3:11]
 
-    def _extract_all_xup(self, cot_using: bool, steps_req: int = 0, u_opt_out: np.ndarray | None = None, u_rate_out: np.ndarray | None = None,):
-        N = self.N
+    self._set_initial_guess_all_stages(self.use_arm_solver, self._x0_arm, self._u0_arm, p)
 
-        if cot_using:
-            nx, nu, np_ = self.yes_cot_nx, self.yes_cot_nu, self.yes_cot_np
-            sol = self.yes_cot_solver
+    t0 = time.perf_counter()
+    status = self.use_arm_solver.solve()
+    solve_ms = (time.perf_counter() - t0) * 1000.0
 
-            xs = self._xs_yes
-            us = self._us_yes
-            ps = self._ps_yes
+    xs, us, ps = self._extract_all_xup(
+      full_model_using=False,
+      arm_model_using=True,
+      steps_req=steps_req,
+      u_opt_out=self._u_opt_steps,
+      u_stage_out=self._u_stage_steps,
+    )
 
-            # x/p: (N+1) stages.
-            # u_opt at step i is stored in augmented command states:
-            #   delta_theta_cmd: x[14:17]
-            #   r_rotor_cmd    : x[17:25]
-            for k in range(N + 1):
-                xk = sol.get(k, "x").reshape(-1)
-                pk = sol.get(k, "p").reshape(-1)
-                xs[k, :] = xk
-                ps[k, :] = pk
-                if u_opt_out is not None and steps_req > 0 and (1 <= k <= steps_req):
-                    u_opt_out[0:3,  k - 1] = xk[14:17]
-                    u_opt_out[3:11, k - 1] = xk[17:25]
+    return self._finalize_solve(xs, us, ps, solve_ms, status, steps_req)
 
-            # u: (N) stages. u_rate at step i is u_i.
-            for k in range(N):
-                uk = sol.get(k, "u").reshape(-1)
-                us[k, :] = uk
-                if u_rate_out is not None and steps_req > 0 and (k < steps_req):
-                    u_rate_out[:, k] = uk
+  def use_full_solve(self, x_0, u_0, p, steps_req: int):
+    x_0 = np.asarray(x_0, dtype=np.float64).ravel()
+    u_0 = np.asarray(u_0, dtype=np.float64).ravel()
+    p = np.asarray(p, dtype=np.float64).ravel()
 
-            return xs, us, ps
+    self._set_initial_guess_all_stages(self.use_full_solver, x_0, u_0, p)
 
-        # ---------------- no_cot -> upcast to yes_cot dims ----------------
-        sol = self.no_cot_solver
+    t0 = time.perf_counter()
+    status = self.use_full_solver.solve()
+    solve_ms = (time.perf_counter() - t0) * 1000.0
 
-        xs = self._xs_up
-        us = self._us_up
-        ps = self._ps_up
+    xs, us, ps = self._extract_all_xup(
+      full_model_using=True,
+      arm_model_using=False,
+      steps_req=steps_req,
+      u_opt_out=self._u_opt_steps,
+      u_stage_out=self._u_stage_steps,
+    )
 
-        # Fill holds once (broadcast).
-        # no_cot doesn't estimate rotor positions, so hold the last known values from input packet.
-        xs[:, 6:14]   = self._last_r_rotor
-        xs[:, 17:25]  = self._last_r_rotor_cmd
+    return self._finalize_solve(xs, us, ps, solve_ms, status, steps_req)
 
-        # Pull each stage once, map into upcast arrays
-        for k in range(N + 1):
-            xk = sol.get(k, "x").reshape(-1)  # (9,)
-            pk = sol.get(k, "p").reshape(-1)  # (14,)
+  def compute_MPC(self, mpci: Dict[str, Any]) -> Dict[str, Any]:
+    x_0 = np.asarray(mpci.get("x_0", np.zeros(self.use_full_nx)), dtype=np.float64).ravel()
+    u_0 = np.asarray(mpci.get("u_0", np.zeros(self.use_full_nu)), dtype=np.float64).ravel()
+    p = np.asarray(mpci.get("p", np.zeros(self.use_full_np)), dtype=np.float64).ravel()
 
-            # no_cot x: [theta(0:3), omega(3:6), delta_theta_cmd(6:9)]
-            xs[k, 0:6]  = xk[0:6]
-            # yes_cot delta_theta_cmd is at [14:17]
-            xs[k, 14:17] = xk[6:9]
-            # Map p -> yes_cot_np for mmap (truncate/pad with zeros)
-            ps[k, :].fill(0.0)
-            m = min(pk.size, self.yes_cot_np)
-            ps[k, 0:m] = pk[0:m]
+    delta_using = bool(mpci.get("use_delta", False))
+    arm_using = bool(mpci.get("use_arm", False))
 
-            # u_opt at step i: [delta_theta_cmd(3), r_rotor_cmd(8)]
-            if u_opt_out is not None and steps_req > 0 and (1 <= k <= steps_req):
-                u_opt_out[0:3,  k - 1] = xk[6:9]
-                u_opt_out[3:11, k - 1] = self._last_r_rotor_cmd
+    steps_req = int(mpci.get("steps_req", 1))
+    if steps_req > self.N:
+      raise ValueError(f"steps_req too large: got {steps_req}, solver horizon N={self.N}")
 
-        for k in range(N):
-            uk = sol.get(k, "u").reshape(-1)  # (3,)
-            us[k, 0:3] = uk
+    if x_0.size != self.use_full_nx:
+      raise ValueError(f"x_0 size mismatch: got {x_0.size}, expected {self.use_full_nx}")
+    if p.size != self.use_full_np:
+      raise ValueError(f"p size mismatch: got {p.size}, expected {self.use_full_np}")
+    if u_0.size != self.use_full_nu:
+      u_0 = np.zeros(self.use_full_nu, dtype=np.float64)
 
-            # u_rate at step i is u_i. Upcast to (11,) with last 8 = 0.
-            if u_rate_out is not None and steps_req > 0 and (k < steps_req):
-                u_rate_out[0:3, k] = uk
-                u_rate_out[3:11, k] = 0.0
+    if delta_using and arm_using:
+      u_opt_steps, u_stage_steps, solve_ms, status = self.use_full_solve(x_0, u_0, p, steps_req)
+    elif (not delta_using) and arm_using:
+      u_opt_steps, u_stage_steps, solve_ms, status = self.use_arm_solve(x_0, u_0, p, steps_req)
+    elif delta_using and (not arm_using):
+      u_opt_steps, u_stage_steps, solve_ms, status = self.use_delta_solve(x_0, u_0, p, steps_req)
+    else:
+      raise ValueError("At least one of 'use_delta' or 'use_arm' must be enabled.")
 
-        return xs, us, ps
+    return {
+      "u_opt": u_opt_steps,
+      "u_stage": u_stage_steps,
+      "u_rate": u_stage_steps,  # Legacy compatibility for the existing C++ wrapper.
+      "solve_ms": float(solve_ms),
+      "state": int(status),
+    }
+
+  def _extract_all_xup(
+    self,
+    full_model_using: bool,
+    arm_model_using: bool = False,
+    steps_req: int = 0,
+    u_opt_out: Optional[np.ndarray] = None,
+    u_stage_out: Optional[np.ndarray] = None,
+  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    N = self.N
+    self._reset_output_steps(steps_req, u_opt_out, u_stage_out)
+
+    if full_model_using:
+      sol = self.use_full_solver
+      xs = self._xs_full
+      us = self._us_full
+      ps = self._ps_full
+
+      xs.fill(0.0)
+      us.fill(0.0)
+      ps.fill(0.0)
+
+      for k in range(N + 1):
+        xk = sol.get(k, "x").reshape(-1)
+        pk = sol.get(k, "p").reshape(-1)
+
+        xs[k, :] = xk
+        ps[k, :] = pk
+
+        if u_opt_out is not None and 1 <= k <= steps_req:
+          uk_prev = sol.get(k - 1, "u").reshape(-1)
+          u_opt_out[0:3, k - 1] = uk_prev[0:3]
+          u_opt_out[3:11, k - 1] = xk[14:22]
+
+      for k in range(N):
+        uk = sol.get(k, "u").reshape(-1)
+        us[k, :] = uk
+
+        if u_stage_out is not None and k < steps_req:
+          u_stage_out[:, k] = uk
+
+      return xs, us, ps
+
+    if arm_model_using:
+      sol = self.use_arm_solver
+      xs = self._xs_up
+      us = self._us_up
+      ps = self._ps_up
+
+      xs.fill(0.0)
+      us.fill(0.0)
+      ps.fill(0.0)
+
+      for k in range(N + 1):
+        xk = sol.get(k, "x").reshape(-1)   # (22,)
+        pk = sol.get(k, "p").reshape(-1)
+
+        # Upcast to full x:
+        # [theta, omega, r_rotor, r_rotor_cmd]
+        xs[k, 0:14] = xk[0:14]
+        xs[k, 14:22] = xk[14:22]
+
+        m = min(pk.size, self.use_full_np)
+        ps[k, 0:m] = pk[0:m]
+
+        if u_opt_out is not None and 1 <= k <= steps_req:
+          u_opt_out[0:3, k - 1] = 0.0
+          u_opt_out[3:11, k - 1] = xk[14:22]
+
+      for k in range(N):
+        uk = sol.get(k, "u").reshape(-1)   # (8,)
+
+        # Upcast to full u:
+        # [delta_theta_cmd=0, r_rotor_cmd_rate]
+        us[k, 0:3] = 0.0
+        us[k, 3:11] = uk
+
+        if u_stage_out is not None and k < steps_req:
+          u_stage_out[0:3, k] = 0.0
+          u_stage_out[3:11, k] = uk
+
+      return xs, us, ps
+
+    # use_delta -> upcast to full layout
+    sol = self.use_delta_solver
+    xs = self._xs_up
+    us = self._us_up
+    ps = self._ps_up
+
+    xs.fill(0.0)
+    us.fill(0.0)
+    ps.fill(0.0)
+
+    # Hold rotor-related states constant across the horizon.
+    xs[:, 6:14] = self._last_r_rotor.reshape(1, 8)
+    xs[:, 14:22] = self._last_r_rotor_cmd.reshape(1, 8)
+
+    for k in range(N + 1):
+      xk = sol.get(k, "x").reshape(-1)   # (6,)
+      pk = sol.get(k, "p").reshape(-1)
+
+      # Upcast to full x:
+      # [theta, omega, r_rotor=hold, r_rotor_cmd=hold]
+      xs[k, 0:6] = xk[0:6]
+
+      m = min(pk.size, self.use_full_np)
+      ps[k, 0:m] = pk[0:m]
+
+      if u_opt_out is not None and 1 <= k <= steps_req:
+        uk_prev = sol.get(k - 1, "u").reshape(-1)
+        u_opt_out[0:3, k - 1] = uk_prev[0:3]
+        u_opt_out[3:11, k - 1] = self._last_r_rotor_cmd
+
+    for k in range(N):
+      uk = sol.get(k, "u").reshape(-1)   # (3,)
+
+      # Upcast to full u:
+      # [delta_theta_cmd, r_rotor_cmd_rate=0]
+      us[k, 0:3] = uk
+      us[k, 3:11] = 0.0
+
+      if u_stage_out is not None and k < steps_req:
+        u_stage_out[0:3, k] = uk
+        u_stage_out[3:11, k] = 0.0
+
+    return xs, us, ps

@@ -1,4 +1,3 @@
-# mpc_viewer.py
 from __future__ import annotations
 
 import os
@@ -12,16 +11,16 @@ import numpy as np
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
   QApplication,
-  QGroupBox,
+  QLabel,
   QMainWindow,
   QSizePolicy,
   QVBoxLayout,
   QWidget,
   QGridLayout,
-  QSplitter,
 )
 
 import pyqtgraph as pg
+
 
 # ----------------------------
 # Robust package-style import
@@ -34,366 +33,509 @@ if __package__ is None or __package__ == "":
   __package__ = THIS_DIR.name
 
 from .mmap_manager import MMapReader, MMapPacket
-from . import params as p  # Always use yes_cot params
+from . import params as p
+from .use_full import costs as c
 
-DebugFrame = Dict[str, Optional[np.ndarray]]
+
+ViewerFrame = Dict[str, np.ndarray]
+
+FULL_NX = 22
+FULL_NU = 11
+FULL_NP = 26
 
 
-def _get(frame: DebugFrame, key: str) -> Optional[np.ndarray]:
-  v = frame.get(key, None)
-  if v is None:
-    return None
-  a = np.asarray(v)
+def _gain3(x: Any) -> np.ndarray:
+  a = np.asarray(x, dtype=np.float64).reshape(-1)
+  if a.size == 1:
+    return np.repeat(a.item(), 3)
+  if a.size != 3:
+    raise ValueError(f"Expected scalar or length-3 gain, got size={a.size}")
   return a
 
 
-# ----------------------------
-# SO(3) math utils (NumPy)
-# ----------------------------
-def euler_zyx_to_R_np(theta: np.ndarray) -> np.ndarray:
-  """Euler ZYX (roll-pitch-yaw) to rotation matrix.
-  theta = [phi, th, psi] in rad.
-  Returns R (3,3) mapping body->global (same convention as model.py).
-  """
-  th = np.asarray(theta, dtype=np.float64).ravel()
-  if th.size != 3:
-    return np.eye(3, dtype=np.float64)
+def _safe_clip(x: float, lo: float, hi: float) -> float:
+  return float(np.clip(float(x), float(lo), float(hi)))
 
-  phi, t, psi = float(th[0]), float(th[1]), float(th[2])
+
+def _euler_zyx_to_R_np(theta: np.ndarray) -> np.ndarray:
+  th = np.asarray(theta, dtype=np.float64).reshape(3)
+  phi, pitch, psi = float(th[0]), float(th[1]), float(th[2])
 
   cphi, sphi = np.cos(phi), np.sin(phi)
-  ct, st = np.cos(t), np.sin(t)
+  cth, sth = np.cos(pitch), np.sin(pitch)
   cpsi, spsi = np.cos(psi), np.sin(psi)
-
-  Rx = np.array([
-    [1.0, 0.0, 0.0],
-    [0.0, cphi, -sphi],
-    [0.0, sphi, cphi],
-  ], dtype=np.float64)
-
-  Ry = np.array([
-    [ct, 0.0, st],
-    [0.0, 1.0, 0.0],
-    [-st, 0.0, ct],
-  ], dtype=np.float64)
 
   Rz = np.array([
     [cpsi, -spsi, 0.0],
-    [spsi, cpsi, 0.0],
-    [0.0, 0.0, 1.0],
+    [spsi,  cpsi, 0.0],
+    [0.0,   0.0,  1.0],
+  ], dtype=np.float64)
+
+  Ry = np.array([
+    [cth,  0.0, sth],
+    [0.0,  1.0, 0.0],
+    [-sth, 0.0, cth],
+  ], dtype=np.float64)
+
+  Rx = np.array([
+    [1.0,  0.0,   0.0],
+    [0.0,  cphi, -sphi],
+    [0.0,  sphi,  cphi],
   ], dtype=np.float64)
 
   return Rz @ Ry @ Rx
 
-def R_to_euler_zyx_np(R: np.ndarray) -> np.ndarray:
-  """Rotation matrix to Euler ZYX (roll-pitch-yaw), rad."""
+
+def _R_to_euler_zyx_np(R: np.ndarray) -> np.ndarray:
   R = np.asarray(R, dtype=np.float64).reshape(3, 3)
 
-  # Robust-ish ZYX extraction (consistent with existing viewer).
-  s = -float(R[2, 0])
-  s = float(np.clip(s, -1.0, 1.0))
-  th = np.arcsin(s)
+  pitch = np.arcsin(_safe_clip(-R[2, 0], -1.0, 1.0))
+  cth = np.cos(pitch)
 
-  if abs(np.cos(th)) < 1e-8:
-    # Gimbal lock
-    phi = 0.0
-    psi = np.arctan2(-R[0, 1], R[1, 1])
+  if abs(cth) < 1e-8:
+    roll = np.arctan2(-R[1, 2], R[1, 1])
+    yaw = 0.0
   else:
-    phi = np.arctan2(R[2, 1], R[2, 2])
-    psi = np.arctan2(R[1, 0], R[0, 0])
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    yaw = np.arctan2(R[1, 0], R[0, 0])
 
-  return np.array([phi, th, psi], dtype=np.float64)
+  return np.array([roll, pitch, yaw], dtype=np.float64)
 
-def hat_np(w: np.ndarray) -> np.ndarray:
-  w = np.asarray(w, dtype=np.float64).ravel()
-  if w.size != 3:
-    return np.zeros((3, 3), dtype=np.float64)
-  wx, wy, wz = float(w[0]), float(w[1]), float(w[2])
+
+def _hat_np(w: np.ndarray) -> np.ndarray:
+  w = np.asarray(w, dtype=np.float64).reshape(3)
   return np.array([
-    [0.0, -wz, wy],
-    [wz, 0.0, -wx],
-    [-wy, wx, 0.0],
+    [0.0,   -w[2],  w[1]],
+    [w[2],   0.0,  -w[0]],
+    [-w[1],  w[0],  0.0],
   ], dtype=np.float64)
 
-def expm_hat_np(w: np.ndarray) -> np.ndarray:
-  """Exponential map exp(hat(w)) for rotation vector w (rad)."""
-  w = np.asarray(w, dtype=np.float64).ravel()
-  if w.size != 3:
-    return np.eye(3, dtype=np.float64)
 
+def _expm_hat_np(w: np.ndarray) -> np.ndarray:
+  w = np.asarray(w, dtype=np.float64).reshape(3)
   th2 = float(np.dot(w, w))
-  th = float(np.sqrt(th2))
-
-  K = hat_np(w)
-  I = np.eye(3, dtype=np.float64)
-
-  if th < 1e-10:
-    # First-order approximation is enough.
-    return I + K
+  th = np.sqrt(th2 + 1e-12)
 
   A = np.sin(th) / th
   B = (1.0 - np.cos(th)) / (th2 + 1e-12)
+
+  K = _hat_np(w)
+  I = np.eye(3, dtype=np.float64)
   return I + A * K + B * (K @ K)
 
-def vee_np(S: np.ndarray) -> np.ndarray:
-  """vee map for a skew-symmetric matrix (3x3)."""
+
+def _vee_np(S: np.ndarray) -> np.ndarray:
   S = np.asarray(S, dtype=np.float64).reshape(3, 3)
   return np.array([S[2, 1], S[0, 2], S[1, 0]], dtype=np.float64)
 
-def gain3_np(x) -> np.ndarray:
-  a = np.asarray(x, dtype=np.float64).reshape(-1)
-  if a.size == 1:
-    a = np.repeat(a.item(), 3)
-  elif a.size != 3:
-    raise ValueError(f"gain must be scalar or length-3, got size={a.size}, value={x}")
-  return a
 
-# ----------------------------
-# Frame computation (one MPC horizon)
-# ----------------------------
-def compute_frame_from_pkt(pkt: MMapPacket) -> DebugFrame:
+def _polar_state_to_cartesian(r_pol: np.ndarray) -> np.ndarray:
+  r_pol = np.asarray(r_pol, dtype=np.float64).reshape(4, 2)
+  r_off_x = np.asarray(p.R_OFF_X, dtype=np.float64).reshape(4)
+  r_off_y = np.asarray(p.R_OFF_Y, dtype=np.float64).reshape(4)
+
+  r_xy = np.zeros((4, 2), dtype=np.float64)
+  for a in range(4):
+    rho = float(r_pol[a, 0])
+    alpha = float(r_pol[a, 1])
+    r_xy[a, 0] = r_off_x[a] + rho * np.cos(alpha)
+    r_xy[a, 1] = r_off_y[a] + rho * np.sin(alpha)
+  return r_xy
+
+
+def _compute_pc_exact(r_pol: np.ndarray, load_angle: float) -> np.ndarray:
+  """
+  Reconstruct pc with the same formula used in use_full/model.py.
+  No clipping is applied to D_a so that the behavior matches the model.
+  """
+  r_pol = np.asarray(r_pol, dtype=np.float64).reshape(4, 2)
+
+  m_link = np.asarray(p.M_LINK, dtype=np.float64).reshape(5)
+  m_link_sum = float(np.sum(m_link))
+  m_tot = float(p.M_CENTER) + 4.0 * m_link_sum
+
+  r_off_x = np.asarray(p.R_OFF_X, dtype=np.float64).reshape(4)
+  r_off_y = np.asarray(p.R_OFF_Y, dtype=np.float64).reshape(4)
+
+  a1 = float(p.A_LINK[0])
+  a2 = float(p.A_LINK[1])
+  a3 = float(p.A_LINK[2])
+  d1 = float(p.D_LINK[0])
+  d2 = float(p.D_LINK[1])
+  d3 = float(p.D_LINK[2])
+  rz = float(p.R_Z)
+
+  center_body_com = np.array([
+    float(p.MAX_COM_BIAS_OF_LOAD) * np.cos(float(load_angle)),
+    0.0,
+  ], dtype=np.float64)
+
+  pc = np.zeros(2, dtype=np.float64)
+
+  with np.errstate(invalid="ignore"):
+    for a in range(4):
+      rho = float(r_pol[a, 0])
+      alpha = float(r_pol[a, 1])
+
+      x_a = rho - a1
+      D_a = (x_a * x_a + rz * rz - a2 * a2 - a3 * a3) / (2.0 * a2 * a3)
+
+      q3 = np.arctan2(np.sqrt(1.0 - D_a * D_a), D_a)
+      q2 = np.arctan2(rz, x_a) - np.arctan2(a3 * np.sin(q3), a2 + a3 * np.cos(q3))
+
+      rho_c_a = (
+        m_link[0] * (a1 + d1)
+        + m_link[1] * (a1 + (a2 + d2) * np.cos(q2))
+        + m_link[2] * (a1 + a2 * np.cos(q2) + (a3 + d3) * np.cos(q2 + q3))
+        + (m_link[3] + m_link[4]) * rho
+      )
+
+      pc += np.array([
+        m_link_sum * (r_off_x[a] + rho_c_a * np.cos(alpha)),
+        m_link_sum * (r_off_y[a] + rho_c_a * np.sin(alpha)),
+      ], dtype=np.float64)
+
+  pc = (pc + center_body_com) / m_tot
+  return pc
+
+
+def _solve_F_exact(A: np.ndarray, w_d: np.ndarray) -> np.ndarray:
+  """
+  Reconstruct F_expr as in the model.
+  If A is singular or invalid, return NaNs instead of a least-squares fallback,
+  because the model itself does not use a fallback solve.
+  """
+  A = np.asarray(A, dtype=np.float64).reshape(4, 4)
+  w_d = np.asarray(w_d, dtype=np.float64).reshape(4)
+
+  if not np.all(np.isfinite(A)) or not np.all(np.isfinite(w_d)):
+    return np.full(4, np.nan, dtype=np.float64)
+
+  try:
+    return np.linalg.solve(A, w_d)
+  except np.linalg.LinAlgError:
+    return np.full(4, np.nan, dtype=np.float64)
+
+
+def _decompose_tau_xy(r_xy: np.ndarray, pc_xy: np.ndarray, F_expr: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+  """
+  Decompose tau_xy into:
+    tau_tot   = exact xy torque about pc from F_expr
+    tau_thrust = xy torque about r_mean
+    tau_off    = offset term from r_mean -> pc
+  """
+  if not np.all(np.isfinite(r_xy)) or not np.all(np.isfinite(pc_xy)) or not np.all(np.isfinite(F_expr)):
+    nan2 = np.full(2, np.nan, dtype=np.float64)
+    return nan2, nan2, nan2, np.full(2, np.nan, dtype=np.float64)
+
+  r_mean_xy = np.mean(r_xy, axis=0)
+
+  A_pc_xy = np.array([
+    [-(r_xy[0, 1] - pc_xy[1]), -(r_xy[1, 1] - pc_xy[1]), -(r_xy[2, 1] - pc_xy[1]), -(r_xy[3, 1] - pc_xy[1])],
+    [ (r_xy[0, 0] - pc_xy[0]),  (r_xy[1, 0] - pc_xy[0]),  (r_xy[2, 0] - pc_xy[0]),  (r_xy[3, 0] - pc_xy[0])],
+  ], dtype=np.float64)
+
+  A_mean_xy = np.array([
+    [-(r_xy[0, 1] - r_mean_xy[1]), -(r_xy[1, 1] - r_mean_xy[1]), -(r_xy[2, 1] - r_mean_xy[1]), -(r_xy[3, 1] - r_mean_xy[1])],
+    [ (r_xy[0, 0] - r_mean_xy[0]),  (r_xy[1, 0] - r_mean_xy[0]),  (r_xy[2, 0] - r_mean_xy[0]),  (r_xy[3, 0] - r_mean_xy[0])],
+  ], dtype=np.float64)
+
+  tau_tot_xy = A_pc_xy @ F_expr
+  tau_thrust_xy = A_mean_xy @ F_expr
+
+  F_sum = float(np.sum(F_expr))
+  dr = r_mean_xy - pc_xy
+  tau_off_xy = np.array([
+    -dr[1] * F_sum,
+     dr[0] * F_sum,
+  ], dtype=np.float64)
+
+  return tau_thrust_xy, tau_off_xy, tau_tot_xy, r_mean_xy
+
+
+def _solve_viewer_frame(pkt: MMapPacket) -> ViewerFrame:
+  """
+  Parse mmap packet strictly as the upcasted use_full layout:
+
+    x = [
+      theta(0:3), omega(3:6),
+      r1(6:8), r2(8:10), r3(10:12), r4(12:14),
+      r1_cmd(14:16), r2_cmd(16:18), r3_cmd(18:20), r4_cmd(20:22)
+    ]
+
+    u = [
+      delta_theta_cmd(0:3),
+      r1_cmd_rate(3:5), r2_cmd_rate(5:7), r3_cmd_rate(7:9), r4_cmd_rate(9:11)
+    ]
+
+    p = [
+      R_raw(0:9), W_raw(9:12), Wdot_raw(12:15),
+      R_0(15:24), f_0(24), load_angle(25)
+    ]
+  """
   N = int(pkt.N)
   nx = int(pkt.nx)
   nu = int(pkt.nu)
   np_ = int(pkt.np)
 
-  T = N + 1
-  dt = float(getattr(p, "DT", 0.015))
+  if nx < FULL_NX or nu < FULL_NU or np_ < FULL_NP:
+    raise ValueError(
+      f"Packet dims are smaller than full-layout expectation: "
+      f"got (nx, nu, np)=({nx}, {nu}, {np_}), "
+      f"expected at least ({FULL_NX}, {FULL_NU}, {FULL_NP})"
+    )
 
-  x_all = np.asarray(pkt.x_all, dtype=np.float64).reshape(T, nx)
-  u_all = np.asarray(pkt.u_all, dtype=np.float64).reshape(N, nu) if N > 0 else np.zeros((0, nu), dtype=np.float64)
-  p_all = np.asarray(pkt.p_all, dtype=np.float64).reshape(T, np_)
+  x_all = np.asarray(pkt.x_all, dtype=np.float64).reshape(N + 1, nx)[:, :FULL_NX]
+  p_all = np.asarray(pkt.p_all, dtype=np.float64).reshape(N + 1, np_)[:, :FULL_NP]
+  u_all = np.asarray(pkt.u_all, dtype=np.float64).reshape(N, nu)[:, :FULL_NU] if N > 0 else np.zeros((0, FULL_NU), dtype=np.float64)
 
-  # Current convention (augmented):
-  # x = [theta(3), omega(3), r_cot(2), delta_theta_cmd(3), r_cot_cmd(2)] => nx=13
-  # u = u_rate = [delta_theta_cmd_rate(3), r_cot_cmd_rate(2)] => nu=5
-  use_aug = (nx >= 13)
+  KR = _gain3(p.KR)
+  KW = _gain3(p.KW)
+  zeta = float(p.ZETA)
 
-  theta = x_all[:, 0:3] if nx >= 3 else np.zeros((T, 3), dtype=np.float64)
-  omega = x_all[:, 3:6] if nx >= 6 else np.zeros((T, 3), dtype=np.float64)
-  r_cot = x_all[:, 6:8] if nx >= 8 else np.zeros((T, 2), dtype=np.float64)
+  steps = np.arange(N, dtype=np.float64)
 
-  if use_aug:
-    delta_theta_cmd = x_all[:, 8:11]
-    r_cot_cmd = x_all[:, 11:13]
-  else:
-    # Legacy fallback: treat u_all as command and replicate last for terminal.
-    u_cmd_T = np.zeros((T, 5), dtype=np.float64)
-    if (N > 0) and (u_all.shape[0] == N) and (u_all.shape[1] >= 5):
-      u_cmd_T[:N, :] = u_all[:, 0:5]
-      u_cmd_T[N, :] = u_cmd_T[N - 1, :]
-    delta_theta_cmd = u_cmd_T[:, 0:3]
-    r_cot_cmd = u_cmd_T[:, 3:5]
-
-  # u_rate (stage axis)
-  u_rate_stage = np.zeros((N, 5), dtype=np.float64)
-  if use_aug and (N > 0) and (u_all.shape[0] == N) and (u_all.shape[1] >= 5):
-    u_rate_stage[:, :] = u_all[:, 0:5]
-
-  # p = [vec(R_raw)(9), omega_raw(3), l(1), T_des(1)] => np=14
-  R_raw_all = np.zeros((T, 3, 3), dtype=np.float64)
-  omega_raw_all = np.zeros((T, 3), dtype=np.float64)
-  l_all = np.zeros((T,), dtype=np.float64)
-  T_des_all = np.zeros((T,), dtype=np.float64)
-
-  for k in range(T):
-    pv = p_all[k, :].ravel()
-    if pv.size < 14:
-      continue
-    # NOTE: CasADi reshape is column-major.
-    R_raw_all[k, :, :] = pv[0:9].reshape(3, 3, order="F")
-    omega_raw_all[k, :] = pv[9:12].astype(np.float64, copy=False)
-    l_all[k] = float(pv[12])
-    T_des_all[k] = float(pv[13])
-
-  # Euler from R_raw
-  theta_raw = np.zeros((T, 3), dtype=np.float64)
-  for k in range(T):
-    theta_raw[k, :] = R_to_euler_zyx_np(R_raw_all[k, :, :])
-
-  # r_mrg = (r_raw + delta_theta_cmd) per requirement (small-angle assumption).
-  theta_mrg = theta_raw + delta_theta_cmd
-
-  # Unit conversions
-  RAD2DEG = 180.0 / np.pi
-  M2MM = 1000.0
-
-  theta_deg = theta * RAD2DEG
-  raw_deg = theta_raw * RAD2DEG
-  mrg_deg = theta_mrg * RAD2DEG
-
-  omega_deg_s = omega * RAD2DEG
-
-  r_cot_mm = r_cot * M2MM
-  r_cot_cmd_mm = r_cot_cmd * M2MM
-
-  u_dth_rate_deg_s = u_rate_stage[:, 0:3] * RAD2DEG
-  u_rcot_rate_mm_s = u_rate_stage[:, 3:5] * M2MM
-
-  # Bounds (constant lines)
-  cot_min = np.asarray(getattr(p, "COT_MIN", [-0.05, -0.05]), dtype=np.float64).ravel()
-  cot_max = np.asarray(getattr(p, "COT_MAX", [0.05, 0.05]), dtype=np.float64).ravel()
-  if cot_min.size < 2:
-    cot_min = np.array([-0.05, -0.05], dtype=np.float64)
-  if cot_max.size < 2:
-    cot_max = np.array([0.05, 0.05], dtype=np.float64)
-
-  cot_min_line = np.tile((cot_min * M2MM).reshape(1, 2), (T, 1))
-  cot_max_line = np.tile((cot_max * M2MM).reshape(1, 2), (T, 1))
-
-  Fmin = float(np.min(np.asarray(getattr(p, "F_MIN", [0, 0, 0, 0]), dtype=np.float64).ravel()))
-  Fmax = float(np.max(np.asarray(getattr(p, "F_MAX", [0, 0, 0, 0]), dtype=np.float64).ravel()))
-  F_min_line = np.full((N,), Fmin, dtype=np.float64)
-  F_max_line = np.full((N,), Fmax, dtype=np.float64)
-
-  # ----------------------------
-  # Derived (right group): tau_d, F1234, cost breakdown
-  # ----------------------------
-  KR = gain3_np(getattr(p, "KR", 1.0))   # (3,)
-  KW = gain3_np(getattr(p, "KW", 1.0))   # (3,)
-  zeta = float(getattr(p, "ZETA", 0.02))
-
-  # Stage-wise (k=0..N-1) per requirement.
-  tau_d = np.zeros((N, 3), dtype=np.float64)
-  for k in range(N):
-    R = euler_zyx_to_R_np(theta[k, :])  # body->global
-    R_d = R_raw_all[k, :, :] @ expm_hat_np(delta_theta_cmd[k, :])
-    e_R = 0.5 * vee_np(R_d.T @ R - R.T @ R_d)
-    omega_k = omega[k, :]
-    omega_raw_k = omega_raw_all[k, :]
-    e_w = omega_k - (R.T @ R_d @ omega_raw_k)
-    tau_d[k, :] = -(KR * e_R) - (KW * e_w)
-
-  # F1234 solve stage-wise
   F_stage = np.full((N, 4), np.nan, dtype=np.float64)
+
+  tau_d_stage = np.full((N, 3), np.nan, dtype=np.float64)
+  tau_thrust_stage = np.full((N, 2), np.nan, dtype=np.float64)
+  tau_off_stage = np.full((N, 2), np.nan, dtype=np.float64)
+  tau_tot_stage = np.full((N, 2), np.nan, dtype=np.float64)
+
+  bFz_pos_stage = np.full(N, np.nan, dtype=np.float64)
+
+  roll_raw_stage = np.full(N, np.nan, dtype=np.float64)
+  roll_des_stage = np.full(N, np.nan, dtype=np.float64)
+  roll_cur_stage = np.full(N, np.nan, dtype=np.float64)
+
+  pitch_raw_stage = np.full(N, np.nan, dtype=np.float64)
+  pitch_des_stage = np.full(N, np.nan, dtype=np.float64)
+  pitch_cur_stage = np.full(N, np.nan, dtype=np.float64)
+
+  r_state_stage = np.full((N, 4, 2), np.nan, dtype=np.float64)
+  r_cmd_stage = np.full((N, 4, 2), np.nan, dtype=np.float64)
+  r_mean_stage = np.full((N, 2), np.nan, dtype=np.float64)
+  r_cmd_mean_stage = np.full((N, 2), np.nan, dtype=np.float64)
+
+  pc_stage = np.full((N, 2), np.nan, dtype=np.float64)
+
+  delta_theta_cmd_stage = np.full((N, 3), np.nan, dtype=np.float64)
+  u_rate_rotor_stage = np.full((N, 8), np.nan, dtype=np.float64)
+
   for k in range(N):
-    dx = float(r_cot[k, 0])
-    dy = float(r_cot[k, 1])
-    l = float(l_all[k])
+    xk = x_all[k, :]
+    pk = p_all[k, :]
+    uk = u_all[k, :] if k < u_all.shape[0] else np.zeros((FULL_NU,), dtype=np.float64)
+
+    theta = xk[0:3]
+    omega = xk[3:6]
+    r_pol = xk[6:14].reshape(4, 2)
+    r_pol_cmd = xk[14:22].reshape(4, 2)
+    delta_theta_cmd = uk[0:3]
+
+    R_raw = pk[0:9].reshape(3, 3, order="F")
+    W_raw = pk[9:12]
+    Wdot_raw = pk[12:15]  # kept for completeness
+    R_0 = pk[15:24].reshape(3, 3, order="F")
+    f_0 = float(pk[24])
+    load_angle = float(pk[25])
+
+    _ = Wdot_raw  # keep exact p-unpack symmetry with model
+
+    R = _euler_zyx_to_R_np(theta)
+    Rd = R_raw @ _expm_hat_np(delta_theta_cmd)
+    Wd = _expm_hat_np(-delta_theta_cmd) @ W_raw
+
+    raw_euler = _R_to_euler_zyx_np(R_raw)
+    des_euler = _R_to_euler_zyx_np(Rd)
+
+    RtRd = R.T @ Rd
+    e_R = 0.5 * _vee_np(RtRd.T - RtRd)
+    e_w = omega - RtRd @ Wd
+    tau_d = -(KR * e_R) - (KW * e_w)
+
+    r_xy = _polar_state_to_cartesian(r_pol)
+    r_cmd_xy = _polar_state_to_cartesian(r_pol_cmd)
+    r_cmd_mean_xy = np.mean(r_cmd_xy, axis=0)
+
+    pc_xy = _compute_pc_exact(r_pol, load_angle)
+
+    b_F0 = np.array([0.0, 0.0, -f_0], dtype=np.float64)
+    g_F0 = R_0 @ b_F0
+    b_F = R.T @ g_F0
+
     A = np.array([
-      [ l - dy,  l - dy, -l - dy, -l - dy],
-      [ l + dx, -l + dx, -l + dx,  l + dx],
-      [-zeta,    zeta,   -zeta,    zeta ],
-      [ -1.0,   -1.0,    -1.0,    -1.0 ],
+      [-(r_xy[0, 1] - pc_xy[1]), -(r_xy[1, 1] - pc_xy[1]), -(r_xy[2, 1] - pc_xy[1]), -(r_xy[3, 1] - pc_xy[1])],
+      [ (r_xy[0, 0] - pc_xy[0]),  (r_xy[1, 0] - pc_xy[0]),  (r_xy[2, 0] - pc_xy[0]),  (r_xy[3, 0] - pc_xy[0])],
+      [-zeta, zeta, -zeta, zeta],
+      [-1.0, -1.0, -1.0, -1.0],
     ], dtype=np.float64)
-    w_d = np.array([tau_d[k, 0], tau_d[k, 1], tau_d[k, 2], float(T_des_all[k])], dtype=np.float64)
 
-    try:
-      F_stage[k, :] = np.linalg.solve(A, w_d)
-    except np.linalg.LinAlgError:
-      F_stage[k, :] = np.linalg.lstsq(A, w_d, rcond=None)[0]
+    w_d = np.array([tau_d[0], tau_d[1], tau_d[2], b_F[2]], dtype=np.float64)
+    F_expr = _solve_F_exact(A, w_d)
 
-  T_tot = np.sum(F_stage, axis=1)
+    tau_thrust_xy, tau_off_xy, tau_tot_xy, r_mean_xy = _decompose_tau_xy(r_xy, pc_xy, F_expr)
 
-  # tau_cot = r_cot x [0,0,T_des] (3D with z=0) per requirement.
-  tau_cot = np.zeros((N, 3), dtype=np.float64)
-  for k in range(N):
-    x = float(r_cot[k, 0])
-    y = float(r_cot[k, 1])
-    Tdes = float(T_des_all[k])
-    tau_cot[k, 0] = y * Tdes
-    tau_cot[k, 1] = -x * Tdes
-    tau_cot[k, 2] = 0.0
+    F_stage[k, :] = F_expr
 
-  # Cost breakdown (stage-wise)
-  Q_OMEGA = np.asarray(getattr(p, "Q_OMEGA", [1.0, 1.0, 1.0]), dtype=np.float64).ravel()
-  Q_THETA = np.asarray(getattr(p, "Q_THETA", [1.0, 1.0, 1.0]), dtype=np.float64).ravel()
-  Q_COT = np.asarray(getattr(p, "Q_COT", [1.0, 1.0]), dtype=np.float64).ravel()
-  R_THETA = np.asarray(getattr(p, "R_THETA", [1.0, 1.0, 1.0]), dtype=np.float64).ravel()
-  R_COT = np.asarray(getattr(p, "R_COT", [1.0, 1.0]), dtype=np.float64).ravel()
+    tau_d_stage[k, :] = tau_d
+    tau_thrust_stage[k, :] = tau_thrust_xy
+    tau_off_stage[k, :] = tau_off_xy
+    tau_tot_stage[k, :] = tau_tot_xy
 
-  J_omega = np.zeros((N,), dtype=np.float64)
-  J_u_ch = np.zeros((N, 5), dtype=np.float64)
-  J_total = np.zeros((N,), dtype=np.float64)
+    bFz_pos_stage[k] = -b_F[2]
 
-  for k in range(N):
-    om = omega[k, :]
-    J_omega[k] = float(np.sum(Q_OMEGA * (om * om)))
+    roll_raw_stage[k] = raw_euler[0]
+    roll_des_stage[k] = des_euler[0]
+    roll_cur_stage[k] = theta[0]
 
-    dtc = delta_theta_cmd[k, :]
-    rcc = r_cot_cmd[k, :]
+    pitch_raw_stage[k] = raw_euler[1]
+    pitch_des_stage[k] = des_euler[1]
+    pitch_cur_stage[k] = theta[1]
 
-    ur = u_rate_stage[k, :]
-    dtc_rate = ur[0:3]
-    rcc_rate = ur[3:5]
+    r_state_stage[k, :, :] = r_xy
+    r_cmd_stage[k, :, :] = r_cmd_xy
+    r_mean_stage[k, :] = r_mean_xy
+    r_cmd_mean_stage[k, :] = r_cmd_mean_xy
+    pc_stage[k, :] = pc_xy
 
-    # NOTE: Stage-wise only; no terminal stage contribution here.
-    J_u_ch[k, 0] = float(Q_THETA[0] * dtc[0] * dtc[0] + R_THETA[0] * dtc_rate[0] * dtc_rate[0])
-    J_u_ch[k, 1] = float(Q_THETA[1] * dtc[1] * dtc[1] + R_THETA[1] * dtc_rate[1] * dtc_rate[1])
-    J_u_ch[k, 2] = float(Q_THETA[2] * dtc[2] * dtc[2] + R_THETA[2] * dtc_rate[2] * dtc_rate[2])
-    J_u_ch[k, 3] = float(Q_COT[0] * rcc[0] * rcc[0] + R_COT[0] * rcc_rate[0] * rcc_rate[0])
-    J_u_ch[k, 4] = float(Q_COT[1] * rcc[1] * rcc[1] + R_COT[1] * rcc_rate[1] * rcc_rate[1])
+    delta_theta_cmd_stage[k, :] = delta_theta_cmd
+    u_rate_rotor_stage[k, :] = uk[3:11]
 
-    J_total[k] = J_omega[k] + float(np.sum(J_u_ch[k, :]))
+  F_min = np.asarray(getattr(c, "F_MIN", np.full(4, np.nan)), dtype=np.float64).reshape(-1)
+  F_max = np.asarray(getattr(c, "F_MAX", np.full(4, np.nan)), dtype=np.float64).reshape(-1)
 
-  # Time axes
-  t_x = np.arange(T, dtype=np.float64) * dt
-  t_u = np.arange(N, dtype=np.float64) * dt
+  if F_min.size == 1:
+    F_min = np.repeat(F_min.item(), 4)
+  if F_max.size == 1:
+    F_max = np.repeat(F_max.item(), 4)
 
-  # T_des on stage axis (for T_tot plot)
-  T_des_stage = T_des_all[:N].copy()
+  if F_min.size != 4:
+    F_min = np.full(4, np.nan, dtype=np.float64)
+  if F_max.size != 4:
+    F_max = np.full(4, np.nan, dtype=np.float64)
 
-  frame: DebugFrame = {
-    "t_x": t_x,
-    "t_u": t_u,
-
-    # Left group (raw horizon)
-    "theta_deg": theta_deg,
-    "raw_deg": raw_deg,
-    "mrg_deg": mrg_deg,
-    "omega_deg_s": omega_deg_s,
-    "r_cot_mm": r_cot_mm,
-    "r_cot_cmd_mm": r_cot_cmd_mm,
-    "cot_min_line": cot_min_line,
-    "cot_max_line": cot_max_line,
-    "u_dth_rate_deg_s": u_dth_rate_deg_s,
-    "u_rcot_rate_mm_s": u_rcot_rate_mm_s,
-
-    # Right group (derived)
+  return {
+    "steps": steps,
     "F_stage": F_stage,
-    "F_min_line": F_min_line,
-    "F_max_line": F_max_line,
-
-    "J_omega": J_omega,
-    "J_u_ch": J_u_ch,
-    "J_total": J_total,
-
-    "tau_d": tau_d,
-    "tau_cot": tau_cot,
-    "T_des_stage": T_des_stage,
-    "T_tot": T_tot,
+    "F_min": F_min,
+    "F_max": F_max,
+    "tau_d": tau_d_stage,
+    "tau_thrust": tau_thrust_stage,
+    "tau_off": tau_off_stage,
+    "tau_tot": tau_tot_stage,
+    "bFz_pos": bFz_pos_stage,
+    "roll_raw": roll_raw_stage,
+    "roll_des": roll_des_stage,
+    "roll_cur": roll_cur_stage,
+    "pitch_raw": pitch_raw_stage,
+    "pitch_des": pitch_des_stage,
+    "pitch_cur": pitch_cur_stage,
+    "r_state": r_state_stage,
+    "r_cmd": r_cmd_stage,
+    "r_mean": r_mean_stage,
+    "r_cmd_mean": r_cmd_mean_stage,
+    "pc": pc_stage,
+    "delta_theta_cmd": delta_theta_cmd_stage,
+    "u_rate_rotor": u_rate_rotor_stage,
   }
-  return frame
 
-# ----------------------------
-# GUI
-# ----------------------------
-class MPCViewerMainWindow(QMainWindow):
+
+class DualAxisPlot:
+  def __init__(
+    self,
+    title: str,
+    left_label: str,
+    right_label: str,
+    left_specs: List[Tuple[str, Any]],
+    right_specs: List[Tuple[str, Any]],
+  ) -> None:
+    self.widget = pg.PlotWidget()
+    self.widget.setBackground("w")
+    self.widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    self.plot_item = self.widget.getPlotItem()
+    self.plot_item.setTitle(title)
+    self.plot_item.showGrid(x=True, y=True, alpha=0.25)
+    self.plot_item.getAxis("left").setPen(pg.mkPen("k"))
+    self.plot_item.getAxis("bottom").setPen(pg.mkPen("k"))
+    self.plot_item.getAxis("left").setTextPen(pg.mkPen("k"))
+    self.plot_item.getAxis("bottom").setTextPen(pg.mkPen("k"))
+    self.plot_item.setLabel("bottom", "step k")
+    self.plot_item.setLabel("left", left_label)
+    self.plot_item.showAxis("right")
+    self.plot_item.getAxis("right").setPen(pg.mkPen("k"))
+    self.plot_item.getAxis("right").setTextPen(pg.mkPen("k"))
+    self.plot_item.setLabel("right", right_label)
+
+    self.legend = self.plot_item.addLegend()
+    self.legend.anchor(itemPos=(1, 0), parentPos=(1, 0), offset=(-10, 10))
+
+    self.right_view = pg.ViewBox()
+    self.plot_item.scene().addItem(self.right_view)
+    self.plot_item.getAxis("right").linkToView(self.right_view)
+    self.right_view.setXLink(self.plot_item.vb)
+
+    self.left_curves: List[Any] = []
+    self.right_curves: List[Any] = []
+
+    for name, pen in left_specs:
+      curve = self.plot_item.plot(name=name, pen=pen)
+      self.left_curves.append(curve)
+
+    for name, pen in right_specs:
+      curve = pg.PlotDataItem(name=name, pen=pen)
+      self.right_view.addItem(curve)
+      self.legend.addItem(curve, name)
+      self.right_curves.append(curve)
+
+    self.plot_item.vb.sigResized.connect(self._update_views)
+    self._update_views()
+
+  def _update_views(self) -> None:
+    self.right_view.setGeometry(self.plot_item.vb.sceneBoundingRect())
+    self.right_view.linkedViewChanged(self.plot_item.vb, self.right_view.XAxis)
+
+  def set_left_data(self, x: np.ndarray, ys: List[np.ndarray]) -> None:
+    for curve, y in zip(self.left_curves, ys):
+      curve.setData(x, y)
+
+  def set_right_data(self, x: np.ndarray, ys: List[np.ndarray]) -> None:
+    for curve, y in zip(self.right_curves, ys):
+      curve.setData(x, y)
+
+
+class ViewerMainWindow(QMainWindow):
   def __init__(self) -> None:
     super().__init__()
-    self.setWindowTitle("MPC one horizon breakdown")
+    self.setWindowTitle("MPC Horizon Viewer (full-layout reconstruction)")
 
-    # Pen configuration (keep similar style to existing viewer).
     lw = 2.0
-    pens = [
-      pg.mkPen(color=(220, 50, 50), width=lw),   # red
-      pg.mkPen(color=(50, 160, 70), width=lw),   # green
-      pg.mkPen(color=(50, 90, 220), width=lw),   # blue
-      pg.mkPen(color=(120, 60, 200), width=lw),  # purple
-      pg.mkPen(color=(0, 0, 0), width=lw),       # black
-      pg.mkPen(color=(255, 140, 0), width=lw),   # orange
-      pg.mkPen(color=(0, 150, 150), width=lw),   # teal
-    ]
+    dash = Qt.DashLine
 
-    pen_dash = pg.mkPen(color=(0, 0, 0), width=lw, style=Qt.DashLine)
-    pen_dash_red = pg.mkPen(color=(220, 50, 50), width=lw, style=Qt.DashLine)
+    pen_r = pg.mkPen(color=(220, 50, 50), width=lw)
+    pen_g = pg.mkPen(color=(50, 160, 70), width=lw)
+    pen_b = pg.mkPen(color=(50, 90, 220), width=lw)
+    pen_p = pg.mkPen(color=(120, 60, 200), width=lw)
+    pen_k = pg.mkPen(color=(20, 20, 20), width=lw)
+
+    pen_r_d = pg.mkPen(color=(220, 50, 50), width=lw, style=dash)
+    pen_g_d = pg.mkPen(color=(50, 160, 70), width=lw, style=dash)
+    pen_b_d = pg.mkPen(color=(50, 90, 220), width=lw, style=dash)
+    pen_p_d = pg.mkPen(color=(120, 60, 200), width=lw, style=dash)
+
+    pen_gray = pg.mkPen(color=(100, 100, 100), width=1.5, style=dash)
+    pen_black = pg.mkPen(color=(0, 0, 0), width=1.5, style=dash)
+
+    self._plots: Dict[str, Tuple[pg.PlotWidget, List[Any]]] = {}
+    self._dual_plots: Dict[str, DualAxisPlot] = {}
 
     def make_plot(
       title: str,
       y_label: str,
-      curve_specs: List[Tuple[Optional[str], Any]],
-      y_range: Optional[Tuple[float, float]] = None,
-    ):
+      curve_specs: List[Tuple[str, Any]],
+      fixed_y_range: Optional[Tuple[float, float]] = None,
+    ) -> Tuple[pg.PlotWidget, List[Any]]:
       w = pg.PlotWidget()
       w.setBackground("w")
       w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -405,267 +547,310 @@ class MPCViewerMainWindow(QMainWindow):
       pi.getAxis("bottom").setPen(pg.mkPen("k"))
       pi.getAxis("left").setTextPen(pg.mkPen("k"))
       pi.getAxis("bottom").setTextPen(pg.mkPen("k"))
+      pi.setLabel("bottom", "step k")
       pi.setLabel("left", y_label)
 
-      if y_range is not None:
-        pi.setYRange(float(y_range[0]), float(y_range[1]), padding=0.0)
+      if fixed_y_range is not None:
+        pi.enableAutoRange(axis="y", enable=False)
+        pi.setYRange(float(fixed_y_range[0]), float(fixed_y_range[1]), padding=0.0)
 
       legend = pi.addLegend()
       legend.anchor(itemPos=(1, 0), parentPos=(1, 0), offset=(-10, 10))
 
-      curves = []
+      curves: List[Any] = []
       for name, pen in curve_specs:
-        if name is None:
-          curves.append(w.plot(pen=pen))  # no legend entry
-        else:
-          curves.append(w.plot(name=name, pen=pen))
+        curves.append(w.plot(name=name, pen=pen))
       return w, curves
 
-    self._plots: Dict[str, Tuple[pg.PlotWidget, list[Any]]] = {}
-
-    # ----------------------------
-    # Layout: left groupbox + right groupbox
-    # ----------------------------
     central = QWidget()
     self.setCentralWidget(central)
 
     root = QVBoxLayout(central)
-    root.setContentsMargins(0, 0, 0, 0)
-    root.setSpacing(0)
+    root.setContentsMargins(8, 8, 8, 8)
+    root.setSpacing(8)
 
-    h_splitter = QSplitter(Qt.Horizontal)
-    root.addWidget(h_splitter)
+    self.info_label = QLabel("Waiting for mmap packet...")
+    self.info_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    root.addWidget(self.info_label)
 
-    # Left group box (raw horizon)
-    gb_l = QGroupBox()
-    gb_l.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    gl = QGridLayout(gb_l)
-    gl.setContentsMargins(8, 8, 8, 8)
-    gl.setSpacing(6)
+    grid = QGridLayout()
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setSpacing(6)
+    root.addLayout(grid)
 
-    # Row 1: Roll/Pitch/Yaw (r, raw, r_mrg)
-    self._plots["roll"] = make_plot("Roll", "[deg]", [("r", pens[2]), ("raw", pen_dash), ("r_mrg", pen_dash_red)])
-    self._plots["pitch"] = make_plot("Pitch", "[deg]", [("p", pens[2]), ("raw", pen_dash), ("p_mrg", pen_dash_red)])
-    self._plots["yaw"] = make_plot("Yaw", "[deg]", [("y", pens[2]), ("raw", pen_dash), ("y_mrg", pen_dash_red)])
+    fmin = np.asarray(getattr(c, "F_MIN", np.zeros(4)), dtype=np.float64).reshape(-1)
+    fmax = np.asarray(getattr(c, "F_MAX", np.zeros(4)), dtype=np.float64).reshape(-1)
 
-    for k in ("roll", "pitch", "yaw"):
-      w = self._plots[k][0]
-      pi = w.getPlotItem()
-      pi.enableAutoRange(axis='y', enable=False)
-      pi.setYRange(-25.0, 25.0, padding=0.0)
+    if fmin.size == 0 or not np.any(np.isfinite(fmin)):
+      y_lo = -1.0
+    else:
+      y_lo = float(np.nanmin(fmin)) - 2.0
 
-    # Row 2: wx/wy/wz (omega)
-    self._plots["wx"] = make_plot("wx", "[deg/s]", [("wx", pens[2])])
-    self._plots["wy"] = make_plot("wy", "[deg/s]", [("wy", pens[2])])
-    self._plots["wz"] = make_plot("wz", "[deg/s]", [("wz", pens[2])])
+    if fmax.size == 0 or not np.any(np.isfinite(fmax)):
+      y_hi = 20.0
+    else:
+      y_hi = float(np.nanmax(fmax)) + 2.0
 
-    for k in ("wx", "wy", "wz"):
-      w = self._plots[k][0]
-      pi = w.getPlotItem()
-      pi.enableAutoRange(axis='y', enable=False)
-      pi.setYRange(-10.0, 10.0, padding=0.0)
-
-    # Row 3: cot_x/cot_y (r_cot, r_cot_cmd, bounds)
-    self._plots["cotx"] = make_plot("cot_x", "[mm]", [("cot", pens[2]), ("cmd", pens[0]), (None, pen_dash), (None, pen_dash_red)])
-    self._plots["coty"] = make_plot("cot_y", "[mm]", [("cot", pens[2]), ("cmd", pens[0]), (None, pen_dash), (None, pen_dash_red)])
-
-    # Row 4: u_theta/u_cot (u_rate)
-    self._plots["u_theta"] = make_plot(
-      "u_theta_rate", "[deg/s]",
-      [("dth_x", pens[0]), ("dth_y", pens[1]), ("dth_z", pens[3])]
-    )
-    self._plots["u_cot"] = make_plot(
-      "u_cot_rate", "[mm/s]",
-      [("dcot_x", pens[5]), ("dcot_y", pens[6])]
-    )
-
-    gl.addWidget(self._plots["roll"][0], 0, 0)
-    gl.addWidget(self._plots["pitch"][0], 0, 1)
-    gl.addWidget(self._plots["yaw"][0], 0, 2)
-
-    gl.addWidget(self._plots["wx"][0], 1, 0)
-    gl.addWidget(self._plots["wy"][0], 1, 1)
-    gl.addWidget(self._plots["wz"][0], 1, 2)
-
-    gl.addWidget(self._plots["cotx"][0], 2, 0, 1, 1)
-    gl.addWidget(self._plots["coty"][0], 2, 1, 1, 1)
-
-    gl.addWidget(self._plots["u_theta"][0], 3, 0, 1, 1)
-    gl.addWidget(self._plots["u_cot"][0], 3, 1, 1, 1)
-
-    h_splitter.addWidget(gb_l)
-
-    # Right group box (derived horizon)
-    gb_r = QGroupBox()
-    gb_r.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    gr = QGridLayout(gb_r)
-    gr.setContentsMargins(8, 8, 8, 8)
-    gr.setSpacing(6)
-
-    # Row 1: Thruster forces (F1..F4 + bounds)
+    # Row 1
     self._plots["F"] = make_plot(
-      "Thruster", "[N]",
-      [("F1", pens[0]), ("F2", pens[1]), ("F3", pens[2]), ("F4", pens[3]), (None, pen_dash), (None, pen_dash_red)]
+      "F1234 (reconstructed from full-layout x,u,p)",
+      "[N]",
+      [("F1", pen_r), ("F2", pen_g), ("F3", pen_b), ("F4", pen_p), ("Fmin", pen_gray), ("Fmax", pen_black)],
+      fixed_y_range=(y_lo, y_hi),
+    )
+    self._plots["tau_x"] = make_plot(
+      "tau_x",
+      "[N·m]",
+      [("tau_d_x", pen_k), ("tau_thrust_x", pen_b), ("tau_off_x", pen_r), ("tau_tot_x", pen_g)],
+    )
+    self._plots["tau_y"] = make_plot(
+      "tau_y",
+      "[N·m]",
+      [("tau_d_y", pen_k), ("tau_thrust_y", pen_b), ("tau_off_y", pen_r), ("tau_tot_y", pen_g)],
+    )
+    self._plots["bFz"] = make_plot(
+      "(-b_F[2])",
+      "[N]",
+      [("-b_F[2]", pen_k)],
     )
 
-    # Row 2: Cost breakdown (stage-wise)
-    pen_total = pg.mkPen(color=(0, 0, 0), width=lw, style=Qt.DashLine)
-    self._plots["cost"] = make_plot(
-      "Cost", "cost",
-      [("J_omega", pens[2]),
-       ("J_dth_x", pens[0]),
-       ("J_dth_y", pens[1]),
-       ("J_dth_z", pens[3]),
-       ("J_rcot_x", pens[5]),
-       ("J_rcot_y", pens[6]),
-       ("J_total", pen_total)]
+    # Row 2
+    self._plots["roll"] = make_plot(
+      "roll raw / des / cur",
+      "[deg]",
+      [("roll_raw", pen_k), ("roll_des", pen_b), ("roll_cur", pen_r)],
+    )
+    self._plots["pitch"] = make_plot(
+      "pitch raw / des / cur",
+      "[deg]",
+      [("pitch_raw", pen_k), ("pitch_des", pen_b), ("pitch_cur", pen_r)],
+    )
+    self._dual_plots["u_rotor"] = DualAxisPlot(
+      title="u_rate(r1234 rho alpha)",
+      left_label="alpha [deg/s]",
+      right_label="rho [mm/s]",
+      left_specs=[
+        ("r1_alpha_dot", pen_r_d),
+        ("r2_alpha_dot", pen_g_d),
+        ("r3_alpha_dot", pen_b_d),
+        ("r4_alpha_dot", pen_p_d),
+      ],
+      right_specs=[
+        ("r1_rho_dot", pen_r),
+        ("r2_rho_dot", pen_g),
+        ("r3_rho_dot", pen_b),
+        ("r4_rho_dot", pen_p),
+      ],
     )
 
-    # Row 3: tau_x / tau_y (tau_thrust, tau_cot)
-    self._plots["tau_x"] = make_plot("tau_x", "[Nm]", [("tau_thrust", pens[0]), ("tau_cot", pens[1])])
-    self._plots["tau_y"] = make_plot("tau_y", "[Nm]", [("tau_thrust", pens[0]), ("tau_cot", pens[1])])
+    # Row 3
+    self._plots["r_x"] = make_plot(
+      "r1,2,3,4 (cmd, cur) x",
+      "[mm]",
+      [
+        ("r1_x", pen_r), ("r1_cmd_x", pen_r_d),
+        ("r2_x", pen_g), ("r2_cmd_x", pen_g_d),
+        ("r3_x", pen_b), ("r3_cmd_x", pen_b_d),
+        ("r4_x", pen_p), ("r4_cmd_x", pen_p_d),
+      ],
+    )
+    self._plots["r_y"] = make_plot(
+      "r1,2,3,4 (cmd, cur) y",
+      "[mm]",
+      [
+        ("r1_y", pen_r), ("r1_cmd_y", pen_r_d),
+        ("r2_y", pen_g), ("r2_cmd_y", pen_g_d),
+        ("r3_y", pen_b), ("r3_cmd_y", pen_b_d),
+        ("r4_y", pen_p), ("r4_cmd_y", pen_p_d),
+      ],
+    )
+    self._plots["r_mean"] = make_plot(
+      "r1234 mean",
+      "[mm]",
+      [("mean_x", pen_r), ("mean_y", pen_b), ("cmd_mean_x", pen_r_d), ("cmd_mean_y", pen_b_d)],
+    )
+    self._plots["pc"] = make_plot(
+      "pc xy",
+      "[mm]",
+      [("pc_x", pen_r), ("pc_y", pen_b)],
+    )
 
-    for k in ("tau_x", "tau_y"):
-      w = self._plots[k][0]
-      pi = w.getPlotItem()
-      pi.enableAutoRange(axis='y', enable=False)
-      pi.setYRange(-2.0, 2.0, padding=0.0)
+    grid.addWidget(self._plots["F"][0], 0, 0)
+    grid.addWidget(self._plots["tau_x"][0], 0, 1)
+    grid.addWidget(self._plots["tau_y"][0], 0, 2)
+    grid.addWidget(self._plots["bFz"][0], 0, 3)
 
-    # Row 4: tau_z and T_tot
-    self._plots["tau_z"] = make_plot("tau_z", "[Nm]", [("tau_thrust", pens[2])])
-    self._plots["tau_z"][0].enableAutoRange(axis='y', enable=False)
-    self._plots["tau_z"][0].setYRange(-1.0, 1.0, padding=0.0)
+    grid.addWidget(self._plots["roll"][0], 1, 0)
+    grid.addWidget(self._plots["pitch"][0], 1, 1)
+    grid.addWidget(self._dual_plots["u_rotor"].widget, 1, 2, 1, 2)
 
-    self._plots["T_tot"] = make_plot("total thrust", "[N]", [("sum_F1234", pens[4]), ("T_des", pen_dash_red)])
-    self._plots["T_tot"][0].enableAutoRange(axis='y', enable=False)
-    self._plots["T_tot"][0].setYRange(50.0, 70.0, padding=0.0)
+    grid.addWidget(self._plots["r_x"][0], 2, 0)
+    grid.addWidget(self._plots["r_y"][0], 2, 1)
+    grid.addWidget(self._plots["r_mean"][0], 2, 2)
+    grid.addWidget(self._plots["pc"][0], 2, 3)
 
-    gr.addWidget(self._plots["F"][0], 0, 0, 1, 2)
-    gr.addWidget(self._plots["cost"][0], 1, 0, 1, 2)
-    gr.addWidget(self._plots["tau_x"][0], 2, 0, 1, 1)
-    gr.addWidget(self._plots["tau_y"][0], 2, 1, 1, 1)
-    gr.addWidget(self._plots["tau_z"][0], 3, 0, 1, 1)
-    gr.addWidget(self._plots["T_tot"][0], 3, 1, 1, 1)
+    base_plot = self._plots["F"][0]
+    for key, (plot_widget, _) in self._plots.items():
+      if key != "F":
+        plot_widget.setXLink(base_plot)
+    for dual in self._dual_plots.values():
+      dual.widget.setXLink(base_plot)
 
-    h_splitter.addWidget(gb_r)
-
-    h_splitter.setStretchFactor(0, 1)
-    h_splitter.setStretchFactor(1, 1)
-
-    # ---- Initial window size: 3:2 aspect ratio ----
     screen = QApplication.primaryScreen()
     if screen is not None:
       avail = screen.availableGeometry()
-      # Use a conservative fraction of available width
-      w0 = int(avail.width() * 0.75)
-      h0 = int(w0 * 2 / 3)  # 3:2 => h = (2/3) w
-
-      # Clamp to available height (keep 3:2 as much as possible)
-      if h0 > int(avail.height() * 0.85):
-        h0 = int(avail.height() * 0.85)
-        w0 = int(h0 * 3 / 2)
-
+      w0 = int(avail.width() * 0.95)
+      h0 = int(avail.height() * 0.92)
       self.resize(w0, h0)
     else:
-      self.resize(1200, 800)  # fallback: 3:2
+      self.resize(1850, 1200)
 
-  def update_from_frame(self, frame: DebugFrame) -> None:
-    t_x = _get(frame, "t_x")
-    t_u = _get(frame, "t_u")
-    if t_x is None or t_u is None:
+  def _set_plot(self, key: str, x: np.ndarray, ys: List[np.ndarray]) -> None:
+    _, curves = self._plots[key]
+    for curve, y in zip(curves, ys):
+      curve.setData(x, y)
+
+  def update_from_packet(self, pkt: MMapPacket) -> None:
+    frame = _solve_viewer_frame(pkt)
+
+    steps = frame["steps"]
+    if steps.size == 0:
       return
 
-    def set_plot(key: str, xs: Any, ys: list[np.ndarray]) -> None:
-      _, curves = self._plots[key]
-      for c, y in zip(curves, ys):
-        c.setData(xs, y)
+    F_stage = frame["F_stage"]
+    F_min = frame["F_min"]
+    F_max = frame["F_max"]
 
-    # Left group
-    theta_deg = _get(frame, "theta_deg")
-    raw_deg = _get(frame, "raw_deg")
-    mrg_deg = _get(frame, "mrg_deg")
-    if theta_deg is not None and raw_deg is not None and mrg_deg is not None:
-      set_plot("roll", t_x, [theta_deg[:, 0], raw_deg[:, 0], mrg_deg[:, 0]])
-      set_plot("pitch", t_x, [theta_deg[:, 1], raw_deg[:, 1], mrg_deg[:, 1]])
-      set_plot("yaw", t_x, [theta_deg[:, 2], raw_deg[:, 2], mrg_deg[:, 2]])
+    tau_d = frame["tau_d"]
+    tau_thrust = frame["tau_thrust"]
+    tau_off = frame["tau_off"]
+    tau_tot = frame["tau_tot"]
+    bFz_pos = frame["bFz_pos"]
 
-    omega_deg_s = _get(frame, "omega_deg_s")
-    if omega_deg_s is not None:
-      set_plot("wx", t_x, [omega_deg_s[:, 0]])
-      set_plot("wy", t_x, [omega_deg_s[:, 1]])
-      set_plot("wz", t_x, [omega_deg_s[:, 2]])
+    roll_raw_deg = np.rad2deg(frame["roll_raw"])
+    roll_des_deg = np.rad2deg(frame["roll_des"])
+    roll_cur_deg = np.rad2deg(frame["roll_cur"])
 
-    r_cot_mm = _get(frame, "r_cot_mm")
-    r_cot_cmd_mm = _get(frame, "r_cot_cmd_mm")
-    cot_min_line = _get(frame, "cot_min_line")
-    cot_max_line = _get(frame, "cot_max_line")
-    if (r_cot_mm is not None) and (r_cot_cmd_mm is not None) and (cot_min_line is not None) and (cot_max_line is not None):
-      set_plot("cotx", t_x, [r_cot_mm[:, 0], r_cot_cmd_mm[:, 0], cot_min_line[:, 0], cot_max_line[:, 0]])
-      set_plot("coty", t_x, [r_cot_mm[:, 1], r_cot_cmd_mm[:, 1], cot_min_line[:, 1], cot_max_line[:, 1]])
+    pitch_raw_deg = np.rad2deg(frame["pitch_raw"])
+    pitch_des_deg = np.rad2deg(frame["pitch_des"])
+    pitch_cur_deg = np.rad2deg(frame["pitch_cur"])
 
-    u_dth_rate_deg_s = _get(frame, "u_dth_rate_deg_s")
-    if u_dth_rate_deg_s is not None and u_dth_rate_deg_s.shape[0] == t_u.shape[0]:
-      set_plot("u_theta", t_u, [u_dth_rate_deg_s[:, 0], u_dth_rate_deg_s[:, 1], u_dth_rate_deg_s[:, 2]])
+    r_state_mm = 1000.0 * frame["r_state"]
+    r_cmd_mm = 1000.0 * frame["r_cmd"]
+    r_mean_mm = 1000.0 * frame["r_mean"]
+    r_cmd_mean_mm = 1000.0 * frame["r_cmd_mean"]
+    pc_mm = 1000.0 * frame["pc"]
 
-    u_rcot_rate_mm_s = _get(frame, "u_rcot_rate_mm_s")
-    if u_rcot_rate_mm_s is not None and u_rcot_rate_mm_s.shape[0] == t_u.shape[0]:
-      set_plot("u_cot", t_u, [u_rcot_rate_mm_s[:, 0], u_rcot_rate_mm_s[:, 1]])
+    delta_theta_cmd_deg = np.rad2deg(frame["delta_theta_cmd"])
 
-    # Right group
-    F_stage = _get(frame, "F_stage")
-    F_min_line = _get(frame, "F_min_line")
-    F_max_line = _get(frame, "F_max_line")
-    if F_stage is not None and F_min_line is not None and F_max_line is not None and F_stage.shape[0] == t_u.shape[0]:
-      set_plot("F", t_u, [F_stage[:, 0], F_stage[:, 1], F_stage[:, 2], F_stage[:, 3], F_min_line, F_max_line])
+    u_rate_rotor = np.asarray(frame["u_rate_rotor"], dtype=np.float64)
+    rho_mm_s = 1000.0 * u_rate_rotor[:, 0::2]
+    alpha_deg_s = np.rad2deg(u_rate_rotor[:, 1::2])
 
-    J_omega = _get(frame, "J_omega")
-    J_u_ch = _get(frame, "J_u_ch")
-    J_total = _get(frame, "J_total")
-    if J_omega is not None and J_u_ch is not None and J_total is not None and J_omega.shape[0] == t_u.shape[0]:
-      set_plot(
-        "cost", t_u,
-        [J_omega,
-         J_u_ch[:, 0], J_u_ch[:, 1], J_u_ch[:, 2],
-         J_u_ch[:, 3], J_u_ch[:, 4],
-         J_total]
-      )
+    if np.any(np.isfinite(F_min)):
+      fmin_line = np.full_like(steps, float(np.nanmin(F_min)), dtype=np.float64)
+    else:
+      fmin_line = np.full_like(steps, np.nan, dtype=np.float64)
 
-    tau_d = _get(frame, "tau_d")
-    tau_cot = _get(frame, "tau_cot")
-    if tau_d is not None and tau_cot is not None and tau_d.shape[0] == t_u.shape[0]:
-      set_plot("tau_x", t_u, [tau_d[:, 0], tau_cot[:, 0]])
-      set_plot("tau_y", t_u, [tau_d[:, 1], tau_cot[:, 1]])
-      set_plot("tau_z", t_u, [tau_d[:, 2]])
+    if np.any(np.isfinite(F_max)):
+      fmax_line = np.full_like(steps, float(np.nanmax(F_max)), dtype=np.float64)
+    else:
+      fmax_line = np.full_like(steps, np.nan, dtype=np.float64)
 
-    T_des_stage = _get(frame, "T_des_stage")
-    T_tot = _get(frame, "T_tot")
-    if T_des_stage is not None and T_tot is not None and T_tot.shape[0] == t_u.shape[0]:
-      # Plot order: sumF (solid), T_des (dashed red)
-      set_plot("T_tot", t_u, [T_tot, -T_des_stage]) # F1234 is positive, T_des_stage is negative
+    self._set_plot(
+      "F",
+      steps,
+      [F_stage[:, 0], F_stage[:, 1], F_stage[:, 2], F_stage[:, 3], fmin_line, fmax_line],
+    )
 
-# ----------------------------
-# App main
-# ----------------------------
+    self._set_plot(
+      "tau_x",
+      steps,
+      [tau_d[:, 0], tau_thrust[:, 0], tau_off[:, 0], tau_tot[:, 0]],
+    )
+    self._set_plot(
+      "tau_y",
+      steps,
+      [tau_d[:, 1], tau_thrust[:, 1], tau_off[:, 1], tau_tot[:, 1]],
+    )
+    self._set_plot("bFz", steps, [bFz_pos])
+
+    self._set_plot("roll", steps, [roll_raw_deg, roll_des_deg, roll_cur_deg])
+    self._set_plot("pitch", steps, [pitch_raw_deg, pitch_des_deg, pitch_cur_deg])
+
+    self._dual_plots["u_rotor"].set_left_data(
+      steps,
+      [alpha_deg_s[:, 0], alpha_deg_s[:, 1], alpha_deg_s[:, 2], alpha_deg_s[:, 3]],
+    )
+    self._dual_plots["u_rotor"].set_right_data(
+      steps,
+      [rho_mm_s[:, 0], rho_mm_s[:, 1], rho_mm_s[:, 2], rho_mm_s[:, 3]],
+    )
+
+    self._set_plot(
+      "r_x",
+      steps,
+      [
+        r_state_mm[:, 0, 0], r_cmd_mm[:, 0, 0],
+        r_state_mm[:, 1, 0], r_cmd_mm[:, 1, 0],
+        r_state_mm[:, 2, 0], r_cmd_mm[:, 2, 0],
+        r_state_mm[:, 3, 0], r_cmd_mm[:, 3, 0],
+      ],
+    )
+    self._set_plot(
+      "r_y",
+      steps,
+      [
+        r_state_mm[:, 0, 1], r_cmd_mm[:, 0, 1],
+        r_state_mm[:, 1, 1], r_cmd_mm[:, 1, 1],
+        r_state_mm[:, 2, 1], r_cmd_mm[:, 2, 1],
+        r_state_mm[:, 3, 1], r_cmd_mm[:, 3, 1],
+      ],
+    )
+    self._set_plot(
+      "r_mean",
+      steps,
+      [r_mean_mm[:, 0], r_mean_mm[:, 1], r_cmd_mean_mm[:, 0], r_cmd_mean_mm[:, 1]],
+    )
+    self._set_plot("pc", steps, [pc_mm[:, 0], pc_mm[:, 1]])
+
+    f_now = F_stage[0, :]
+    tau_d_now = tau_d[0, :]
+    tau_thrust_now = tau_thrust[0, :]
+    tau_off_now = tau_off[0, :]
+    tau_tot_now = tau_tot[0, :]
+    pc_now = pc_mm[0, :]
+    bFz_now = float(bFz_pos[0])
+    dtheta0_deg = delta_theta_cmd_deg[0, :]
+
+    self.info_label.setText(
+      f"seq={pkt.seq}   status={pkt.status}   solve_ms={pkt.solve_ms:.3f}   "
+      f"F0=[{f_now[0]:.3f}, {f_now[1]:.3f}, {f_now[2]:.3f}, {f_now[3]:.3f}]   "
+      f"tau_d_xy0=[{tau_d_now[0]:.3f}, {tau_d_now[1]:.3f}]   "
+      f"tau_thrust_xy0=[{tau_thrust_now[0]:.3f}, {tau_thrust_now[1]:.3f}]   "
+      f"tau_off_xy0=[{tau_off_now[0]:.3f}, {tau_off_now[1]:.3f}]   "
+      f"tau_tot_xy0=[{tau_tot_now[0]:.3f}, {tau_tot_now[1]:.3f}]   "
+      f"(-bF[2])0={bFz_now:.3f}   "
+      f"delta_theta_cmd0[deg]=[{dtheta0_deg[0]:.2f}, {dtheta0_deg[1]:.2f}, {dtheta0_deg[2]:.2f}]   "
+      f"pc[mm]=[{pc_now[0]:.2f}, {pc_now[1]:.2f}]"
+    )
+
+
 def main() -> int:
-  app = QApplication(sys.argv)
+  pg.setConfigOptions(antialias=True)
 
+  app = QApplication(sys.argv)
   app.setStyleSheet("""
   QWidget { background: #ffffff; color: #111111; }
   QMainWindow { background: #ffffff; }
-  QGroupBox {
-    border: 1px solid #cfcfcf;
-    border-radius: 6px;
-    margin-top: 8px;
-    font-weight: bold;
-  }
-  QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 8px;
-    padding: 0 4px 0 4px;
+  QLabel {
+    font-family: monospace;
+    font-size: 12px;
+    padding: 2px 4px 2px 4px;
   }
   """)
 
-  win = MPCViewerMainWindow()
+  win = ViewerMainWindow()
   win.show()
 
   path = os.environ.get("MRG_MMAP", "/tmp/MRG_debug.mmap")
@@ -689,8 +874,7 @@ def main() -> int:
         return
       last_seq = seq
 
-      frame = compute_frame_from_pkt(pkt)
-      win.update_from_frame(frame)
+      win.update_from_packet(pkt)
 
     except Exception:
       traceback.print_exc()
@@ -699,7 +883,6 @@ def main() -> int:
   timer.timeout.connect(poll_mmap)
   timer.start(100)
 
-  # Allow Ctrl+C in terminal to quit cleanly.
   def _sigint_handler(*_args: Any) -> None:
     app.quit()
 
@@ -716,6 +899,7 @@ def main() -> int:
 
   app.aboutToQuit.connect(_cleanup)
   return int(app.exec_())
+
 
 if __name__ == "__main__":
   raise SystemExit(main())

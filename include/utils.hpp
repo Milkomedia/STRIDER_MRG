@@ -42,10 +42,10 @@ struct Command {
   double tauz_bar  = 0.0;                               // current yaw thrust torque [N.m] (Sequential control allocation)
   // These can only be changed by MRG
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
-  Eigen::Vector3d r1 = Eigen::Vector3d::Zero();         // desired rotor1 position [m], z-element is not updated
-  Eigen::Vector3d r2 = Eigen::Vector3d::Zero();         // desired rotor2 position [m], z-element is not updated
-  Eigen::Vector3d r3 = Eigen::Vector3d::Zero();         // desired rotor3 position [m], z-element is not updated
-  Eigen::Vector3d r4 = Eigen::Vector3d::Zero();         // desired rotor4 position [m], z-element is not updated
+  Eigen::Vector3d r1 = param::r1_init;                  // desired rotor1 position [m], z-element is not updated
+  Eigen::Vector3d r2 = param::r2_init;                  // desired rotor2 position [m], z-element is not updated
+  Eigen::Vector3d r3 = param::r3_init;                  // desired rotor3 position [m], z-element is not updated
+  Eigen::Vector3d r4 = param::r4_init;                  // desired rotor4 position [m], z-element is not updated
   // NOTE: r1234 can be manually changed by SBUS during [GAC_FLIGHT] phase.
 };
 
