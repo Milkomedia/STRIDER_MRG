@@ -154,8 +154,8 @@ int main() {
   uint64_t prev_omega_ns = 0;
   Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
-  double saturation_thrust = param::SATURATION_THRUST; // ??
-  Eigen::Vector3d bPcot = Eigen::Vector3d::Zero(); // ??
+  double saturation_thrust = param::SATURATION_THRUST;
+  Eigen::Vector3d bPcot = Eigen::Vector3d::Zero();
 
   // --- MPC parameters ---
   uint32_t mpc_key = 1;
@@ -439,8 +439,8 @@ int main() {
         // l_mpc_output updated only when solve succeed.
         if (mpc_on && epoch_ok && key_ok && solve_ok) {l_mpc_output = g_mpc_output;}
         else if (mpc_on && epoch_ok && !key_ok) {
-          std::fprintf(stderr, "[MPC key error!]\n"); std::fflush(stderr);
-          mpc_reset_locked(mpc_key);
+          std::fprintf(stderr, "[MPC key mismatch] out=%u expected=%u epoch=%u\n", g_mpc_output.key, mpc_key, g_mpc_output.epoch);
+          std::fflush(stderr);
         }
         s.last_mpc_status = g_mpc_output.state;
         g_mpc_output.has = false;
@@ -587,10 +587,10 @@ int main() {
         rising_coeff += param::RISING_COEFF_INC;
         if (rising_coeff >= 1.0) {
           rising_coeff = 1.0;
-          for (int i = 0; i < 4; ++i) { pwm(i) *= rising_coeff; }
           phase = Phase::GAC_ONLY;
           std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
         }
+        for (int i = 0; i < 4; ++i) { pwm(i) *= rising_coeff; }
       } break;
     }
 

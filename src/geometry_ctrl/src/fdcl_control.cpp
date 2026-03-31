@@ -87,8 +87,8 @@ void fdcl::control::position_control(void){
 }
 
 Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& Rd, const Eigen::Vector3d& Wd, const Eigen::Vector3d& Wd_dot){
-  Matrix3 RdtR = Rd.transpose() * state->R;
-  eR = 0.5 * vee(RdtR - RdtR.transpose());
+  Matrix3 RtRd = state->R.transpose() * Rd;
+  eR = 0.5 * vee(RtRd.transpose() - RtRd);
 
   // if norm(eR) exceeds limit, scale it back
   double eR_norm = eR.norm();
@@ -101,8 +101,8 @@ Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& Rd, const Eigen::
   M = - kR * eR \
       - kW * eW \
       - kI * eIR.error \
-      - state->J * hat(state->W) * RdtR.transpose() * Wd \
-      + state->J * state->R.transpose() * Rd * Wd_dot;
+      - state->J * hat(state->W) * RtRd * Wd \
+      + state->J * RtRd * Wd_dot;
 
   // clamp torque xyz
   M.x() = std::clamp(M.x(), -param::ROLL_TORQUE_SAT, param::ROLL_TORQUE_SAT);

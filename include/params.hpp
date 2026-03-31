@@ -112,7 +112,7 @@ static constexpr double rotor_dir[4] = {1.0, -1.0, 1.0, -1.0}; // propeller torq
 
 // ===== Take-off parameters =====
 static constexpr double IDLE_PWM_DUTY = 0.15; // override pwm duty [0.0~1.0]
-static constexpr double TAKE_OFF_TIME = 3.0;  // smoothing thime   [sec]
+static constexpr double TAKE_OFF_TIME = 0.5;  // smoothing thime   [sec]
 static constexpr double INITIAL_RISING_COEFF = IDLE_PWM_DUTY / std::sqrt((M*G/4.0-PWM_B)/PWM_A) + 0.1; // this not tunable
 static constexpr double RISING_COEFF_INC = (1.0 - INITIAL_RISING_COEFF) * std::chrono::duration_cast<std::chrono::duration<double>>(CTRL_DT).count() / TAKE_OFF_TIME; // this not tunable
 
