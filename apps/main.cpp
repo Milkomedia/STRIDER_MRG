@@ -328,7 +328,7 @@ int main() {
         // changing arm position (only GAC_FLIGHT)
         if(phase == Phase::GAC_FLIGHT || phase == Phase::ARMED || phase == Phase::IDLE) {
           bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
-          cmd.r1 = smooth(cmd.r1, param::r1_init - bPcot, 0.01);
+          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
           cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
           cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
           cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
