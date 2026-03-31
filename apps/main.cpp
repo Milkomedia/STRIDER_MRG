@@ -1,6 +1,6 @@
+#include "fdcl_control.hpp"
 #include "mmap_logger.hpp"
 #include "mpc_wrapper.hpp"
-#include "fdcl_control.hpp"
 #include "teensy.hpp"
 #include "dynamixel.hpp"
 #include "sbus.hpp"
@@ -397,7 +397,6 @@ int main() {
     gac_cmd.b1d = cmd.heading;
     gac_state.x = s.pos;
     gac_state.v = s.vel;
-    gac_state.a = s.acc;
     gac_state.R = s.R;
     gac_state.W = s.omega;
     gac.position_control();
@@ -520,9 +519,11 @@ int main() {
     }
 
     // ==== ATTITUDE CONTROL ====
-    // TODO : fix Geometry controller
-    const Eigen::Matrix3d R_d = R_raw * expm_hat(cmd.d_theta);
-    Eigen::Vector3d tau_des = gac.attitude_control(R_d);
+    const Eigen::Matrix3d Et = expm_hat(-cmd.d_theta);
+    const Eigen::Matrix3d Rd = R_raw * Et.transpose();
+    const Eigen::Vector3d Wd = Et * omega_raw;
+    const Eigen::Vector3d Wd_dot = Et * alpha_raw;
+    const Eigen::Vector3d tau_des = gac.attitude_control(Rd, Wd, Wd_dot);
     
     // ==== CONTORL ALLOCATION ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (thrust_des > 0)
@@ -609,7 +610,7 @@ int main() {
         ld.rpy_raw[2] = static_cast<float>(rpy_raw(2));
       }
       {
-        const Eigen::Vector3d rpy_d = R_to_rpy(R_d);
+        const Eigen::Vector3d rpy_d = R_to_rpy(Rd);
         ld.rpy_d[0] = static_cast<float>(rpy_d(0));
         ld.rpy_d[1] = static_cast<float>(rpy_d(1));
         ld.rpy_d[2] = static_cast<float>(rpy_d(2));

@@ -37,7 +37,7 @@ struct acados_wrapper::Impl {
   Impl() {
     pybind11::gil_scoped_acquire gil;
     ensure_python_paths();
-    pybind11::module_ mod = pybind11::module_::import("mpc_py.solver");
+    pybind11::module_ mod = pybind11::module_::import("acados.solver");
     solver = mod.attr("StriderNMPC")();
   }
 

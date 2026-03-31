@@ -2,6 +2,7 @@
 #define UTILS_H
 
 #include "params.hpp"
+#include "fdcl_matrix_utils.hpp"
 
 #include <unistd.h>
 
@@ -197,20 +198,6 @@ static inline Eigen::Vector3d R_to_rpy(const Eigen::Matrix3d& R) {
     const double psi = std::atan2(-r12, r22);
     return Eigen::Vector3d(phi, th, psi);
   }
-}
-
-static inline Eigen::Matrix3d hat(const Eigen::Vector3d& v){
-  Eigen::Matrix3d V;
-  V.setZero();
-
-  V(2,1) = v(0);
-  V(1,2) = -V(2, 1);
-  V(0,2) = v(1);
-  V(2,0) = -V(0, 2);
-  V(1,0) = v(2);
-  V(0,1) = -V(1, 0);
-
-  return V;
 }
 
 static inline Eigen::Matrix3d expm_hat(const Eigen::Vector3d& w) {

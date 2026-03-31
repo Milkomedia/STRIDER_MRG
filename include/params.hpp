@@ -25,8 +25,6 @@ static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y,
 // ===== Geometry attitude control gain =====
 static constexpr double kR[3]  = {50.0, 50.0,  14.0}; // Rotational gain [roll, pitch, yaw]
 static constexpr double kW[3]  = {11.0, 11.0,  5.50}; // angular Velocity gain [roll, pitch, yaw]
-static constexpr double kI     = 0.00;  // Integral gain for roll and pitch -> gaseggi しんで
-static constexpr double kyI    = 0.0;  // Integral gain for yaw
 
 // ===== UAV Parameter =====
 static constexpr double Jx_bar = 0.138;  // Nominal : bar 0.068 + Mass 0.07 = 0.138 [kg m^2] 

@@ -6,13 +6,11 @@ fdcl::control::control(
   state(state_), command(command_)
 {
   // init uninitialized parameters
-  e1 << 1.0, 0.0, 0.0;
-  e2 << 0.0, 1.0, 0.0;
   e3 << 0.0, 0.0, 1.0;
 
   state->J << param::J[0], param::J[1], param::J[2], 
-             param::J[3], param::J[4], param::J[5], 
-             param::J[6], param::J[7], param::J[8];
+              param::J[3], param::J[4], param::J[5], 
+              param::J[6], param::J[7], param::J[8];
 
   // load parameters from the config file
   fdcl::control::load_config();
@@ -20,12 +18,8 @@ fdcl::control::control(
   command_->xd << 0.0, 0.0, 0.0;
   command_->xd_dot.setZero();
   command_->xd_2dot.setZero();
-  command_->xd_3dot.setZero();
-  command_->xd_4dot.setZero();
 
   command_->b1d << 1.0, 0.0, 0.0;
-  command_->b1d_dot.setZero();
-  command_->b1d_ddot.setZero();
 };
 
 fdcl::control::control(void){
@@ -56,7 +50,7 @@ void fdcl::control::position_control(void){
   
   // force 'f' along negative b3-axis - eq (14)
   // this term equals to R.e3
-  Vector3 A = -kX*eX - kV*eV - kIX*eIX.error - m*g*e3 + m*command->xd_2dot;
+  Vector3 A = -kX * eX - kV * eV - kIX * eIX.error - m * g * e3 + m * command->xd_2dot;
 
   Vector3 b3 = state->R * e3;
   Vector3 b3_dot = state->R * hat(state->W) * e3; // eq (22)
@@ -64,18 +58,18 @@ void fdcl::control::position_control(void){
 
   // intermediate terms for rotational errors
   Vector3 ea = g * e3 - f_total / m * b3 - command->xd_2dot;
-  Vector3 A_dot = -kX * eV - kV * ea + m * command->xd_3dot;
+  Vector3 A_dot = -kX * eV - kV * ea;
 
   double fdot = -A_dot.dot(b3) - A.dot(b3_dot);
-  Vector3 eb = -fdot / m * b3 - f_total / m * b3_dot - command->xd_3dot;
-  Vector3 A_ddot = -kX * ea - kV * eb + m * command->xd_4dot;
+  Vector3 eb = -fdot / m * b3 - f_total / m * b3_dot;
+  Vector3 A_ddot = -kX * ea - kV * eb;
 
   Vector3 b3c, b3c_dot, b3c_ddot;
   deriv_unit_vector(-A, -A_dot, -A_ddot, b3c, b3c_dot, b3c_ddot);
 
   Vector3 A2 = -hat(command->b1d) * b3c;
-  Vector3 A2_dot = -hat(command->b1d_dot) * b3c - hat(command->b1d) * b3c_dot;
-  Vector3 A2_ddot = -hat(command->b1d_ddot)*b3c - 2.0*hat(command->b1d_dot)*b3c_dot - hat(command->b1d)*b3c_ddot;
+  Vector3 A2_dot = -hat(command->b1d) * b3c_dot;
+  Vector3 A2_ddot = -hat(command->b1d)*b3c_ddot;
 
   Vector3 b2c, b2c_dot, b2c_ddot;
   deriv_unit_vector(A2, A2_dot, A2_ddot, b2c, b2c_dot, b2c_ddot);
@@ -84,46 +78,31 @@ void fdcl::control::position_control(void){
   Vector3 b1c_dot = hat(b2c_dot) * b3c + hat(b2c) * b3c_dot;
   Vector3 b1c_ddot = hat(b2c_ddot)*b3c + 2.0*hat(b2c_dot)*b3c_dot + hat(b2c)*b3c_ddot;
 
-  Matrix3 Rddot, Rdddot;
-
   command->Rd << b1c, b2c, b3c;
   Rddot << b1c_dot, b2c_dot, b3c_dot;
   Rdddot << b1c_ddot, b2c_ddot, b3c_ddot;
 
   command->Wd = vee(command->Rd.transpose()*Rddot);
   command->Wd_dot = vee(command->Rd.transpose()*Rdddot - hat(command->Wd)*hat(command->Wd));
-
-  // roll / pitch
-  command->b3d = b3c;
-  command->b3d_dot = b3c_dot;
-  command->b3d_ddot = b3c_ddot;
-
-  // yaw
-  command->b1c = b1c;
-  command->wc3 = e3.dot(state->R.transpose() * command->Rd * command->Wd);
-  command->wc3_dot = (e3).dot(state->R.transpose()*command->Rd * command->Wd_dot) - e3.dot(hat(state->W)*state->R.transpose()*command->Rd*command->Wd);
 }
 
-Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& R_d){
-  command->Rd = R_d; // use MRG calculated R_d
-
-  Matrix3 RdtR = command->Rd.transpose() * state->R;
+Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& Rd, const Eigen::Vector3d& Wd, const Eigen::Vector3d& Wd_dot){
+  Matrix3 RdtR = Rd.transpose() * state->R;
   eR = 0.5 * vee(RdtR - RdtR.transpose());
 
   // if norm(eR) exceeds limit, scale it back
   double eR_norm = eR.norm();
   if(eR_norm > param::ER_NORM_MAX) {eR = eR * (param::ER_NORM_MAX / eR_norm);}
 
-  eW = state->W - state->R.transpose() * command->Rd * command->Wd;
+  eW = state->W - state->R.transpose() * Rd * Wd;
 
   eIR.integrate(eW + eR, dt);
 
   M = - kR * eR \
       - kW * eW \
       - kI * eIR.error \
-      + hat(state->R.transpose() * command->Rd * command->Wd) * state->J * \
-            state->R.transpose() * command->Rd * command->Wd \
-      + state->J * state->R.transpose() * command->Rd * command->Wd_dot;
+      - state->J * hat(state->W) * RdtR.transpose() * Wd \
+      + state->J * state->R.transpose() * Rd * Wd_dot;
 
   // clamp torque xyz
   M.x() = std::clamp(M.x(), -param::ROLL_TORQUE_SAT, param::ROLL_TORQUE_SAT);
@@ -135,9 +114,6 @@ Vector3 fdcl::control::attitude_control(const Eigen::Matrix3d& R_d){
 
 void fdcl::control::integral_reset(){
   eIR.set_zero();
-  eI1.set_zero();
-  eI2.set_zero();
-  eIy.set_zero();
   eIX.set_zero();
 }
 
@@ -164,8 +140,6 @@ void fdcl::control::load_config(void){
   kIX(0,0) = param::kIX[0];
   kIX(1,1) = param::kIX[1];
   kIX(2,2) = param::kIX[2];
-  kI  = param::kI;
-  kyI = param::kyI;
 
   sat_sigma_x_ = param::kIX_SAT[0] / param::kIX[0];
   sat_sigma_y_ = param::kIX_SAT[1] / param::kIX[1];

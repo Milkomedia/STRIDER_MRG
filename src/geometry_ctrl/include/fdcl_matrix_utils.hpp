@@ -2,13 +2,13 @@
 #define FDCL_MATRIX_UTILS_HPP
 
 #include "fdcl_common_types.hpp"
-#include "utils.hpp" // hat
 
 #include <iostream>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
-Vector3 vee(const Matrix3 V);
+Matrix3 hat(const Vector3& v);
+Vector3 vee(const Matrix3& V);
 
 void deriv_unit_vector(const Vector3 &A, const Vector3 &A_dot, const Vector3 &A_ddot, Vector3 &q, Vector3 &q_dot, Vector3 &q_ddot);
 

@@ -265,6 +265,7 @@ target_include_directories(strider_core PUBLIC
 target_link_libraries(strider_core PUBLIC
   Threads::Threads
   Eigen3::Eigen
+  geometry_ctrl
   dl
   "${REALSENSE2_SO}"
 )
