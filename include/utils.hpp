@@ -2,7 +2,8 @@
 #define UTILS_H
 
 #include "params.hpp"
-#include "fdcl_matrix_utils.hpp"
+#include "fdcl_matrix_utils.hpp" // hat
+#include "mpc_wrapper.hpp"
 
 #include <unistd.h>
 
@@ -29,9 +30,10 @@ struct State {
   Eigen::Vector3d r2  = Eigen::Vector3d::Zero();       // current rotor2 position [m] (Dynamixel)
   Eigen::Vector3d r3  = Eigen::Vector3d::Zero();       // current rotor3 position [m] (Dynamixel)
   Eigen::Vector3d r4  = Eigen::Vector3d::Zero();       // current rotor4 position [m] (Dynamixel)
-  Eigen::Vector3d r_cot = Eigen::Vector3d::Zero();     // current b_p_Cot position [m] (Dynamixel)
+  Eigen::Vector3d r_cot = Eigen::Vector3d::Zero();     // current b_p_CoT position [m] (Dynamixel)
   double arm_q[20] = {0.0};                            // current joint angle [rad] (Dynamixel)
-  Eigen::Vector3d r_com = Eigen::Vector3d::Zero();     // current estimated CoM position [m] 
+  Eigen::Vector3d r_com = Eigen::Vector3d::Zero();     // current estimated CoM position [m]
+  uint8_t last_mpc_status = 255;                       // latest mpc solve status
 };
 
 struct Command {
@@ -841,6 +843,17 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
 }
 
 // --------- [ ETC ] ---------
+static inline void clear_local_plan(strider_mpc::MPCOutput& l) {
+  l.u_opt.setZero();
+  l.u_stage.setZero();
+  l.solve_ms = 0.0;
+  l.state = 255;
+  l.t = std::chrono::steady_clock::time_point::max();
+  l.key = 0;
+  l.epoch = 0;
+  l.has = false;
+}
+
 // Best-effort RT priority; will fail without CAP_SYS_NICE.
 static inline void try_set_prior(int prio) {
   sched_param sp{};

@@ -276,15 +276,25 @@ int main() {
 
         if (phase == Phase::GAC_ONLY) {
           if (ch7_changed && db_ch7.high()) {
-            g_mpc_activated.store(true, std::memory_order_relaxed);
-            mpc_reset_locked(mpc_key);
+            {
+              std::lock_guard<std::mutex> lk(mpc_mtx);
+              g_mpc_activated.store(true, std::memory_order_relaxed);
+              mpc_reset_locked(mpc_key);
+            }
+            clear_local_plan(l_mpc_output);
+            cmd.d_theta.setZero();
             phase = Phase::USE_FULL;
             initial_gate = false;
             std::fprintf(stdout, "flight state -> [USE_FULL]\n"); std::fflush(stdout);
           }
           if (ch7_changed && db_ch7.low()) {
-            g_mpc_activated.store(true, std::memory_order_relaxed);
-            mpc_reset_locked(mpc_key);
+            {
+              std::lock_guard<std::mutex> lk(mpc_mtx);
+              g_mpc_activated.store(true, std::memory_order_relaxed);
+              mpc_reset_locked(mpc_key);
+            }
+            clear_local_plan(l_mpc_output);
+            cmd.d_theta.setZero();
             phase = Phase::USE_ARM;
             initial_gate = false;
             std::fprintf(stdout, "flight state -> [USE_ARM]\n"); std::fflush(stdout);
@@ -292,14 +302,26 @@ int main() {
         }
         else if (phase == Phase::USE_ARM) {
           if (ch7_changed && db_ch7.mid()) {
-            g_mpc_activated.store(false, std::memory_order_relaxed);
+            {
+              std::lock_guard<std::mutex> lk(mpc_mtx);
+              g_mpc_activated.store(false, std::memory_order_relaxed);
+              mpc_reset_locked(mpc_key);
+            }
+            clear_local_plan(l_mpc_output);
+            cmd.d_theta.setZero();
             phase = Phase::GAC_ONLY;
             std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
           }
         }
         else if (phase == Phase::USE_FULL) {
           if (ch7_changed && db_ch7.mid()) {
-            g_mpc_activated.store(false, std::memory_order_relaxed);
+            {
+              std::lock_guard<std::mutex> lk(mpc_mtx);
+              g_mpc_activated.store(false, std::memory_order_relaxed);
+              mpc_reset_locked(mpc_key);
+            }
+            clear_local_plan(l_mpc_output);
+            cmd.d_theta.setZero();
             phase = Phase::GAC_ONLY;
             std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
           }
@@ -416,8 +438,11 @@ int main() {
 
         // l_mpc_output updated only when solve succeed.
         if (mpc_on && epoch_ok && key_ok && solve_ok) {l_mpc_output = g_mpc_output;}
-        else if (mpc_on && epoch_ok && !key_ok) {mpc_reset_locked(mpc_key);}
-        l_mpc_output.state = g_mpc_output.state; // *BUT l_mpc_output state indicates previous solve state(for logging)*
+        else if (mpc_on && epoch_ok && !key_ok) {
+          std::fprintf(stderr, "[MPC key error!]\n"); std::fflush(stderr);
+          mpc_reset_locked(mpc_key);
+        }
+        s.last_mpc_status = g_mpc_output.state;
         g_mpc_output.has = false;
       }
     }
@@ -426,9 +451,8 @@ int main() {
     if (mpc_on) { // MPC unpack
       const bool epoch_ok = (l_mpc_output.epoch == g_mpc_epoch.load(std::memory_order_relaxed));
       const bool time_ok = ((now - l_mpc_output.t) < param::MPC_TIMEOUT_DURATUION);
-      const bool solve_ok = (l_mpc_output.state == 0);
 
-      if (epoch_ok && time_ok && solve_ok) {
+      if (epoch_ok && time_ok) {
         const std::size_t idx = static_cast<std::size_t>(std::floor(std::chrono::duration<double>(now - l_mpc_output.t).count() / param::MPC_STEP_DT));
 
         Eigen::Vector2d p1, p2, p3, p4; // polar opt r_cmd
@@ -692,7 +716,7 @@ int main() {
       for (uint8_t i=0; i<20; ++i){ld.q_cmd[i] = static_cast<float>(q_d[i]);}
 
       ld.solve_ms = static_cast<float>(l_mpc_output.solve_ms);
-      ld.solve_status = static_cast<int32_t>(l_mpc_output.state);
+      ld.solve_status = static_cast<int32_t>(s.last_mpc_status);
 
       ld.phase = static_cast<uint8_t>(phase);
 
