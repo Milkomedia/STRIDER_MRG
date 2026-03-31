@@ -278,9 +278,6 @@ void SBUS::run() {
         continue;
       }
 
-      uint8_t raw25[25];
-      std::memcpy(raw25, rx.data() + i, 25);
-
       // valid frame
       const uint64_t host_ns = now_steady_ns();
       SBUSFrame s;
