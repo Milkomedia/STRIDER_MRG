@@ -149,6 +149,7 @@ int main() {
   cmd.r2 = param::r2_init;
   cmd.r3 = param::r3_init;
   cmd.r4 = param::r4_init;
+  std::array<Eigen::Vector2d, 4> r_cmd_prev = { cmd.r1.head<2>(), cmd.r2.head<2>(), cmd.r3.head<2>(), cmd.r4.head<2>()};
   Eigen::Vector3d prev_omega = Eigen::Vector3d::Zero();
   uint64_t prev_omega_ns = 0;
   Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
@@ -326,8 +327,8 @@ int main() {
 
         // changing arm position (only GAC_FLIGHT)
         if(phase == Phase::GAC_FLIGHT || phase == Phase::ARMED || phase == Phase::IDLE) {
-          bPcot = Eigen::Vector3d(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]), 0.0);
-          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
+          bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
+          cmd.r1 = smooth(cmd.r1, param::r1_init - bPcot, 0.01);
           cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
           cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
           cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
@@ -390,7 +391,6 @@ int main() {
         const Eigen::Vector2d r_com_xy = com_estimator(s.arm_q);
         s.r_com(0) = r_com_xy(0);
         s.r_com(1) = r_com_xy(1);
-        printf("[COM] x: %.4f | %.4f  y: %.4f | %.4f\n ", s.r_com(0), s.r_com(0)/s.r_cot(0), s.r_com(1), s.r_com(1)/s.r_cot(1));
         last_dxl_cnt = cur_dxl_cnt;
       }
     }
@@ -520,6 +520,17 @@ int main() {
     // --- get joint angle commands ---
     double q_d[20] = {0};
     //IK(param::r1_init, param::r2_init, param::r3_init, param::r4_init, tilt_ang_des, q_d);
+
+    // --- ARM-ws check ---
+    std::array<Eigen::Vector2d, 4> r_cmd = { cmd.r1.head<2>(), cmd.r2.head<2>(), cmd.r3.head<2>(), cmd.r4.head<2>() };
+
+    if (make_feasible(r_cmd)) {
+      cmd.r1.head<2>() = r_cmd[0]; cmd.r2.head<2>() = r_cmd[1]; cmd.r3.head<2>() = r_cmd[2]; cmd.r4.head<2>() = r_cmd[3];
+      r_cmd_prev = r_cmd;
+    } else { 
+      cmd.r1.head<2>() = r_cmd_prev[0]; cmd.r2.head<2>() = r_cmd_prev[1]; cmd.r3.head<2>() = r_cmd_prev[2]; cmd.r4.head<2>() = r_cmd_prev[3]; 
+      printf("[ARM_WS] FALLBACK TO PREVIOUS SAFE CMD\n");
+    }
     IK(cmd.r1, cmd.r2, cmd.r3, cmd.r4, tilt_ang_des, q_d);
     // --- get pwm ---
     Eigen::Vector4d pwm;

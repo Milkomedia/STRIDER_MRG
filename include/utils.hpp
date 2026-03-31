@@ -412,6 +412,136 @@ static inline Eigen::Vector2d com_estimator(const double arm_q[20]) {
   return r_com;
 }
 
+static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
+
+  constexpr double B2BASE_X[4]            = { 0.12*inv_sqrt2, -0.12*inv_sqrt2, -0.12*inv_sqrt2,  0.12*inv_sqrt2}; // x-distance from the body frame to each base frame [m]
+  constexpr double B2BASE_Y[4]            = {-0.12*inv_sqrt2, -0.12*inv_sqrt2,  0.12*inv_sqrt2,  0.12*inv_sqrt2}; // y-distance from the body frame to each base frame [m]
+  constexpr double sq_min_stretch_fail    = (param::MIN_STRETCH - param::STRETCH_FAIL_MARGIN) * (param::MIN_STRETCH - param::STRETCH_FAIL_MARGIN);
+  constexpr double sq_max_stretch_fail    = (param::MAX_STRETCH + param::STRETCH_FAIL_MARGIN) * (param::MAX_STRETCH + param::STRETCH_FAIL_MARGIN);
+  constexpr double sq_rotor_diameter_fail = (param::ROTOR_DIAMETER - param::COLLISION_FAIL_MARGIN) * (param::ROTOR_DIAMETER - param::COLLISION_FAIL_MARGIN);
+  constexpr double sq_max_stretch         = param::MAX_STRETCH * param::MAX_STRETCH;
+  constexpr double sq_min_stretch         = param::MIN_STRETCH * param::MIN_STRETCH;
+  constexpr double sq_rotor_diameter      = param::ROTOR_DIAMETER * param::ROTOR_DIAMETER;
+
+  constexpr double sign_x[4] = {+1.0, -1.0, -1.0, +1.0};
+  constexpr double sign_y[4] = {-1.0, -1.0, +1.0, +1.0};
+  constexpr int nbr_a[4] = {3, 0, 1, 2}; // nearby rotor a index
+  constexpr int nbr_b[4] = {1, 2, 3, 0}; // nearby rotor b index
+
+  for (int it = 0; it < 3; ++it) { // A few iterations to resolve "workspace <-> collision" coupling
+    for (int i = 0; i < 4; ++i) { // per each rotor
+      { // ------------ [ 1. Workspace guard ] ------------
+        double rx = r[i].x() - B2BASE_X[i];
+        double ry = r[i].y() - B2BASE_Y[i];
+
+        // Sign clamp
+        if (sign_x[i] > 0.0) { if (rx < 0.0) rx = 0.0; }
+        else { if (rx > 0.0) rx = 0.0; }
+
+        if (sign_y[i] > 0.0) { if (ry < 0.0) ry = 0.0; }
+        else { if (ry > 0.0) ry = 0.0; }
+
+        // Hard-fail if stretch is too far outside
+        double sqd_r = rx*rx + ry*ry;
+        if (sqd_r < sq_min_stretch_fail || sqd_r > sq_max_stretch_fail) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: stretch too far.\n", it); std::fflush(stderr); return false;}
+
+        if (sqd_r < sq_min_stretch || sqd_r > sq_max_stretch) {
+          const double abs_r = std::sqrt(sqd_r);
+          const double target = (sqd_r < sq_min_stretch) ? param::MIN_STRETCH : param::MAX_STRETCH;
+          const double scale_factor = target / abs_r;
+          rx *= scale_factor;
+          ry *= scale_factor;
+          std::fprintf(stderr, "[arm-cmd check] iter[%d]: rotor[%d] scaled by %f\n", it, i+1, scale_factor); std::fflush(stderr);
+        }
+
+        r[i].x() = B2BASE_X[i] + rx;
+        r[i].y() = B2BASE_Y[i] + ry;
+      }
+
+      { // ------------ [ 2. Rotor collision guard ] ------------
+        const Eigen::Vector2d p0(r[i].x(), r[i].y());
+        const Eigen::Vector2d pa(r[nbr_a[i]].x(), r[nbr_a[i]].y());
+        const Eigen::Vector2d pb(r[nbr_b[i]].x(), r[nbr_b[i]].y());
+        Eigen::Vector2d p = p0; // new target xy to compute
+
+        const Eigen::Vector2d ap0 = p0 - pa;
+        const Eigen::Vector2d bp0 = p0 - pb;
+        const double sqrd_ap0 = ap0.squaredNorm();
+        const double sqrd_bp0 = bp0.squaredNorm();
+
+        // (1) collision occurred too deep -> fail
+        if (sqrd_ap0 < sq_rotor_diameter_fail || sqrd_bp0 < sq_rotor_diameter_fail) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: collision occured too deep.\n", it); std::fflush(stderr); return false;}
+
+        // (2) both already safe -> skip
+        if (sqrd_ap0 >= sq_rotor_diameter && sqrd_bp0 >= sq_rotor_diameter) {continue;}
+
+        // (3) collision occurred -> move target p
+        const bool closeA = (sqrd_ap0 < sq_rotor_diameter);
+        const bool closeB = (sqrd_bp0 < sq_rotor_diameter);
+        if (closeA && closeB) { // both are closer than D -> |p - pa| = D, |p - pb| = D  (two solutions)
+          const Eigen::Vector2d dc = pb - pa;
+          const double d2 = dc.squaredNorm();
+          const double d = std::sqrt(d2);
+
+          // For equal radii D: midpoint m, offset h along perpendicular
+          const Eigen::Vector2d m = 0.5 * (pa + pb);
+          double h2 = sq_rotor_diameter - 0.25*d2;
+          if (h2 < 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: negative h2 detected.\n", it); std::fflush(stderr); return false;}
+          const double h = std::sqrt(h2);
+          const Eigen::Vector2d n(-dc.y() / d, dc.x() / d); // unit perpendicular (rotate +90deg)
+
+          p = m + n * h;
+        }
+        else { // only one side is closer than D
+          const Eigen::Vector2d Close = closeA ? pa : pb;
+          const Eigen::Vector2d Far   = closeA ? pb : pa; 
+          const double r1_keep2 = closeA ? sqrd_bp0 : sqrd_ap0; // keep original distance to the other rotor
+
+          const Eigen::Vector2d dc = Far - Close;
+          const double d2 = dc.squaredNorm();
+          const double d = std::sqrt(d2);
+
+          const double a = (sq_rotor_diameter + d2 - r1_keep2) / (2.0 * d);
+          double h = std::sqrt(sq_rotor_diameter - a*a);
+
+          const Eigen::Vector2d n(-dc.y() / d, dc.x() / d); // unit perpendicular (rotate +90deg)
+
+          p = Close + a * dc / d + n * h;
+        }
+
+        // Commit XY
+        r[i].x() = p.x();
+        r[i].y() = p.y();
+
+        { // NaN/Inf guard
+          if (!r[i].allFinite()) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: r[i]=r[%d] NaN/Inf detected.\n", it, i); std::fflush(stderr); return false;}
+          const int ia = nbr_a[i]; const int ib = nbr_b[i];
+          if (!r[ia].allFinite()) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: r[ia]=r[%d] NaN/Inf detected.\n", it, ia); std::fflush(stderr); return false;}
+          if (!r[ib].allFinite()) {std::fprintf(stderr, "[arm-cmd check] WARNING-iter[%d]: r[ib]=r[%d] NaN/Inf detected.\n", it, ib); std::fflush(stderr); return false;}
+        }
+        std::fprintf(stderr, "[arm-cmd check] iter[%d]: collision removed.\n", it); std::fflush(stderr);
+      }
+    } // rotor 1234
+  } // iter
+
+  // ------------ [ 3. Final pass check (just check) ] ------------
+  for (int i = 0; i < 4; ++i) {
+    double dx = r[i].x() - B2BASE_X[i];
+    double dy = r[i].y() - B2BASE_Y[i];
+
+    if (sign_x[i] > 0.0) { if (dx < 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_x[%d]<0\n", i); std::fflush(stderr); return false;}}
+    else { if (dx > 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_x[%d]>0\n", i); std::fflush(stderr); return false;}}
+
+    if (sign_y[i] > 0.0) { if (dy < 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_y[%d]<0\n", i); std::fflush(stderr); return false;}}
+    else { if (dy > 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_y[%d]>0\n", i); std::fflush(stderr); return false;}}
+
+    double n2 = dx*dx + dy*dy;
+    if (n2 < sq_min_stretch || n2 > sq_max_stretch) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: arm-%d too much stretch.\n", i); std::fflush(stderr); return false;}
+  }
+  
+  return true;
+}
+
 // --------- [ Control Allocation ] ---------
 static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Vector3d& tau_d, double& tauz_bar, const double arm_q[20], const Eigen::Vector3d& Pc, Eigen::Vector4d& C1_des, Eigen::Vector4d& C2_des) {
 

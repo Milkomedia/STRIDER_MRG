@@ -34,6 +34,7 @@ static constexpr double M_bar  = 1.0;   // Nominal : bar 0.460 + Mass 0.47    = 
 static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
                                          -0.0006,  0.0006,  0.5318 + Jz_bar}; // [kg m^2]
+
 static constexpr double M  = 7.40 + M_bar;    // [kg]
 static constexpr double G  = 9.80665;         // [m/s^2] (must be positive)
 
@@ -45,6 +46,7 @@ static constexpr double SATURATION_THRUST  = 40; // (85%) Maximum thrust per eac
 // ===== Control Allocation =====
 static constexpr double M_link[5] = {0.374106, 0.13658, 0.0415148, 0.102003, 0.3734}; //each link mass [kg]
 static constexpr double M_body = 1.6845345+1.0;   // center body + load mass [kg]
+
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable
 
@@ -113,6 +115,17 @@ static constexpr double IDLE_PWM_DUTY = 0.15; // override pwm duty [0.0~1.0]
 static constexpr double TAKE_OFF_TIME = 3.0;  // smoothing thime   [sec]
 static constexpr double INITIAL_RISING_COEFF = IDLE_PWM_DUTY / std::sqrt((M*G/4.0-PWM_B)/PWM_A) + 0.1; // this not tunable
 static constexpr double RISING_COEFF_INC = (1.0 - INITIAL_RISING_COEFF) * std::chrono::duration_cast<std::chrono::duration<double>>(CTRL_DT).count() / TAKE_OFF_TIME; // this not tunable
+
+// ===== Workspace constraint =====
+inline constexpr double MAX_STRETCH       = 0.2925; // Maximum distance arm can extend from the base [m]
+inline constexpr double MIN_STRETCH       = 0.1506; // Minimum distance arm can extend from the base [m]
+inline constexpr double ROTOR_DIAMETER    = 0.44;   // propeller diameter [m]
+
+inline constexpr double STRETCH_FAIL_MARGIN    = 0.2; // [m]
+inline constexpr double COLLISION_FAIL_MARGIN  = 0.2; // [m]
+inline constexpr double GUARD_MOVE_MARGIN      = 0.2; // [m]
+inline constexpr double ALPHA_MIN[4] = {-105.0 * M_PI/180.0, -195.0 * M_PI/180.0,  75.0 * M_PI/180.0, -15.0 * M_PI/180.0};
+inline constexpr double ALPHA_MAX[4] = {  15.0 * M_PI/180.0,  -75.0 * M_PI/180.0, 195.0 * M_PI/180.0, 105.0 * M_PI/180.0};
 
 // ===== Arm parameters =====
 static constexpr double B2BASE_THETA[4] = {-0.25*M_PI, -0.75*M_PI, 0.75*M_PI, 0.25*M_PI};
