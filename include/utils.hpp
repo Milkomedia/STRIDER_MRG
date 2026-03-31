@@ -10,9 +10,10 @@ enum class Phase : uint8_t {
   ARMED          = 1,  // all sanity checked
   IDLE           = 2,  // all propellers are idling
   RISING         = 3,  // propeller thrust increasing
-  GAC_FLIGHT     = 4,  // flight with geometry controller
-  MRG_NO_COT     = 5,  // flight with reference governor
-  MRG_YES_COT    = 6,  // flight with reference governor (use CoT moving)
+  GAC_ONLY       = 4,  // flight with only geometry controller
+  USE_DTHETA     = 5,  // flight with delta-theta filtering
+  USE_ARM        = 6,  // flight with arm-moving
+  USE_FULL       = 7,  // flight with arm-moving and delta-theta filtering
   KILLED         = 99, // killed; (It's not used as a trigger, just a state representation)
 };
 
@@ -40,7 +41,7 @@ struct Command {
   Eigen::Vector3d heading = Eigen::Vector3d(1,0,0);     // desired heading vector [unit vector]
   // This can only be changed by Control Allocation
   double tauz_bar  = 0.0;                               // current yaw thrust torque [N.m] (Sequential control allocation)
-  // These can only be changed by MRG
+  // These can only be changed by MPC
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
   Eigen::Vector3d r1 = param::r1_init;                  // desired rotor1 position [m], z-element is not updated
   Eigen::Vector3d r2 = param::r2_init;                  // desired rotor2 position [m], z-element is not updated
@@ -131,7 +132,6 @@ struct LPF {
 };
 
 // --------- [ Math utility ] ---------
-static inline constexpr double inv_sqrt2 = 0.7071067811865474617150084668537601828575;  // 1/sqrt(2)
 
 static inline Eigen::Vector3d quat_to_RPY(const Eigen::Quaterniond q) {
   // Quaternion to Euler angle map
@@ -412,10 +412,61 @@ static inline Eigen::Vector2d com_estimator(const double arm_q[20]) {
   return r_com;
 }
 
-static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
+static inline double spin_360(double a, double amin, double amax) {
+  constexpr double two_pi = 2.0 * M_PI;
 
-  constexpr double B2BASE_X[4]            = { 0.12*inv_sqrt2, -0.12*inv_sqrt2, -0.12*inv_sqrt2,  0.12*inv_sqrt2}; // x-distance from the body frame to each base frame [m]
-  constexpr double B2BASE_Y[4]            = {-0.12*inv_sqrt2, -0.12*inv_sqrt2,  0.12*inv_sqrt2,  0.12*inv_sqrt2}; // y-distance from the body frame to each base frame [m]
+  double best = a;
+  double best_err = 1e100;
+
+  for (int k = -2; k <= 2; ++k) {
+    const double ak = a + static_cast<double>(k) * two_pi;
+    double err = 0.0;
+    if (ak < amin) err = amin - ak;
+    else if (ak > amax) err = ak - amax;
+
+    if (err < best_err) {
+      best_err = err;
+      best = ak;
+    }
+    if (err <= 1e-12) break; // already inside
+  }
+  return best;
+}
+
+static inline void cart2polar(const Eigen::Vector3d& r1, const Eigen::Vector3d& r2, const Eigen::Vector3d& r3, const Eigen::Vector3d& r4, Eigen::Vector2d& p1, Eigen::Vector2d& p2, Eigen::Vector2d& p3, Eigen::Vector2d& p4) {
+  constexpr double eps = 1e-12;
+
+  const Eigen::Vector3d* cart[4] = {&r1, &r2, &r3, &r4};
+  Eigen::Vector2d* polar[4] = {&p1, &p2, &p3, &p4};
+
+  for (int a = 0; a < 4; ++a) {
+    const double dx = (*cart[a])(0) - param::B2BASE_X[a];
+    const double dy = (*cart[a])(1) - param::B2BASE_Y[a];
+
+    const double rho = std::sqrt(dx * dx + dy * dy);
+    double alpha = (rho > eps) ? std::atan2(dy, dx) : 0.0;
+
+    // Make alpha compatible with your box bounds which may exceed [-pi, pi].
+    alpha = spin_360(alpha, param::ALPHA_MIN[a], param::ALPHA_MAX[a]);
+
+    (*polar[a])(0) = rho;
+    (*polar[a])(1) = alpha;
+  }
+}
+
+static inline void polar2cart(const Eigen::Vector2d& p1, const Eigen::Vector2d& p2, const Eigen::Vector2d& p3, const Eigen::Vector2d& p4, Eigen::Vector2d& r1, Eigen::Vector2d& r2, Eigen::Vector2d& r3, Eigen::Vector2d& r4) {
+  const Eigen::Vector2d* polar[4] = {&p1, &p2, &p3, &p4};
+  Eigen::Vector2d* cart[4] = {&r1, &r2, &r3, &r4};
+
+  for (int a = 0; a < 4; ++a) {
+    const double rho   = (*polar[a])(0);
+    const double alpha = (*polar[a])(1);
+    (*cart[a])(0) = param::B2BASE_X[a] + rho * std::cos(alpha);
+    (*cart[a])(1) = param::B2BASE_Y[a] + rho * std::sin(alpha);
+  }
+}
+
+static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
   constexpr double sq_min_stretch_fail    = (param::MIN_STRETCH - param::STRETCH_FAIL_MARGIN) * (param::MIN_STRETCH - param::STRETCH_FAIL_MARGIN);
   constexpr double sq_max_stretch_fail    = (param::MAX_STRETCH + param::STRETCH_FAIL_MARGIN) * (param::MAX_STRETCH + param::STRETCH_FAIL_MARGIN);
   constexpr double sq_rotor_diameter_fail = (param::ROTOR_DIAMETER - param::COLLISION_FAIL_MARGIN) * (param::ROTOR_DIAMETER - param::COLLISION_FAIL_MARGIN);
@@ -431,8 +482,8 @@ static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
   for (int it = 0; it < 3; ++it) { // A few iterations to resolve "workspace <-> collision" coupling
     for (int i = 0; i < 4; ++i) { // per each rotor
       { // ------------ [ 1. Workspace guard ] ------------
-        double rx = r[i].x() - B2BASE_X[i];
-        double ry = r[i].y() - B2BASE_Y[i];
+        double rx = r[i].x() - param::B2BASE_X[i];
+        double ry = r[i].y() - param::B2BASE_Y[i];
 
         // Sign clamp
         if (sign_x[i] > 0.0) { if (rx < 0.0) rx = 0.0; }
@@ -454,8 +505,8 @@ static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
           std::fprintf(stderr, "[arm-cmd check] iter[%d]: rotor[%d] scaled by %f\n", it, i+1, scale_factor); std::fflush(stderr);
         }
 
-        r[i].x() = B2BASE_X[i] + rx;
-        r[i].y() = B2BASE_Y[i] + ry;
+        r[i].x() = param::B2BASE_X[i] + rx;
+        r[i].y() = param::B2BASE_Y[i] + ry;
       }
 
       { // ------------ [ 2. Rotor collision guard ] ------------
@@ -526,8 +577,8 @@ static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
 
   // ------------ [ 3. Final pass check (just check) ] ------------
   for (int i = 0; i < 4; ++i) {
-    double dx = r[i].x() - B2BASE_X[i];
-    double dy = r[i].y() - B2BASE_Y[i];
+    double dx = r[i].x() - param::B2BASE_X[i];
+    double dy = r[i].y() - param::B2BASE_Y[i];
 
     if (sign_x[i] > 0.0) { if (dx < 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_x[%d]<0\n", i); std::fflush(stderr); return false;}}
     else { if (dx > 0.0) {std::fprintf(stderr, "[arm-cmd check] WARNING final-pass: sign_x[%d]>0\n", i); std::fflush(stderr); return false;}}

@@ -60,7 +60,7 @@ int main() {
     try_set_prior(param::MPC_PRIOR);
     pybind11::scoped_interpreter py_guard{false};
     strider_mpc::acados_wrapper mpc; // compile acados before start.
-    std::fprintf(stdout, " ||----------------------------------||\n ||       Acados compile done.       ||\n ||     You can turn on the MRG.     ||\n ||----------------------------------||\n\n");  std::fflush(stdout);
+    std::fprintf(stdout, " ||----------------------------------||\n ||       Acados compile done.       ||\n ||     You can turn on the MPC.     ||\n ||----------------------------------||\n\n");  std::fflush(stdout);
 
     while (!g_killed.load()) {
       strider_mpc::MPCInput in_local;
@@ -80,9 +80,14 @@ int main() {
       }
 
       strider_mpc::MPCOutput out_local;
-      try { out_local = mpc.compute(in_local); }
-      catch (const std::exception&) { out_local.solve_ms = 0.0; out_local.state = 99; std::printf("OH SHIT");}
-
+      try { out_local = mpc.compute(in_local);}
+      catch (const std::exception& e) {
+        out_local.solve_ms = 0.0;
+        out_local.state = 99;
+        std::fprintf(stderr, "[MPC EXCEPTION] %s\n", e.what());
+        std::fflush(stderr);
+      }
+      
       {
         std::lock_guard<std::mutex> lk(mpc_mtx);
         g_mpc_output = out_local;
@@ -145,23 +150,17 @@ int main() {
   Phase   phase = Phase::READY;
   State   s{};
   Command cmd{};
-  cmd.r1 = param::r1_init;
-  cmd.r2 = param::r2_init;
-  cmd.r3 = param::r3_init;
-  cmd.r4 = param::r4_init;
-  std::array<Eigen::Vector2d, 4> r_cmd_prev = { cmd.r1.head<2>(), cmd.r2.head<2>(), cmd.r3.head<2>(), cmd.r4.head<2>()};
   Eigen::Vector3d prev_omega = Eigen::Vector3d::Zero();
   uint64_t prev_omega_ns = 0;
   Eigen::Vector3d prev_vel = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
-  double saturation_thrust = param::SATURATION_THRUST;
-  Eigen::Vector3d bPcot = Eigen::Vector3d::Zero();
+  double saturation_thrust = param::SATURATION_THRUST; // ??
+  Eigen::Vector3d bPcot = Eigen::Vector3d::Zero(); // ??
 
-  // --- MRG parameters ---
-  bool mpc_in_solving = false;
+  // --- MPC parameters ---
   uint32_t mpc_key = 1;
   strider_mpc::MPCOutput l_mpc_output;
-  l_mpc_output.u_rate.setZero();
+  l_mpc_output.u_stage.setZero();
   l_mpc_output.u_opt.setZero();
   l_mpc_output.t = std::chrono::steady_clock::time_point::max();
   
@@ -275,48 +274,44 @@ int main() {
         const bool ch7_changed = db_ch7.update(sbus_frame.ch[7]);
         const bool ch8_changed = db_ch8.update(sbus_frame.ch[8]);
 
-        if (phase == Phase::GAC_FLIGHT) {
+        if (phase == Phase::GAC_ONLY) {
           if (ch7_changed && db_ch7.high()) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
-            phase = Phase::MRG_YES_COT;
+            phase = Phase::USE_FULL;
             initial_gate = false;
-            std::fprintf(stdout, "flight state -> [MRG_YES_COT]\n"); std::fflush(stdout);
+            std::fprintf(stdout, "flight state -> [USE_FULL]\n"); std::fflush(stdout);
           }
           if (ch7_changed && db_ch7.low()) {
             g_mpc_activated.store(true, std::memory_order_relaxed);
             mpc_reset_locked(mpc_key);
-            phase = Phase::MRG_NO_COT;
+            phase = Phase::USE_ARM;
             initial_gate = false;
-            std::fprintf(stdout, "flight state -> [MRG_NO_COT]\n"); std::fflush(stdout);
+            std::fprintf(stdout, "flight state -> [USE_ARM]\n"); std::fflush(stdout);
           }
         }
-        else if (phase == Phase::MRG_NO_COT) {
+        else if (phase == Phase::USE_ARM) {
           if (ch7_changed && db_ch7.mid()) {
-            cmd.d_theta.setZero();         // reset previous optimal u
-            l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
-            phase = Phase::GAC_FLIGHT;
-            std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
+            phase = Phase::GAC_ONLY;
+            std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
           }
         }
-        else if (phase == Phase::MRG_YES_COT) {
+        else if (phase == Phase::USE_FULL) {
           if (ch7_changed && db_ch7.mid()) {
-            cmd.d_theta.setZero();         // reset previous optimal u
-            l_mpc_output.u_rate.setZero(); // reset previous optimal u
             g_mpc_activated.store(false, std::memory_order_relaxed);
-            phase = Phase::GAC_FLIGHT;
-            std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
+            phase = Phase::GAC_ONLY;
+            std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
           }
         }
         else if (phase == Phase::ARMED) {
-          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_ONLY] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
             if (ch8_changed && db_ch8.mid()) {phase = Phase::IDLE;std::fprintf(stdout, "flight state -> [IDLE]\n"); std::fflush(stdout);}
           }
         }
         else if (phase == Phase::IDLE) {
-          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_FLIGHT] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
+          if (!db_ch7.mid()) {std::fprintf(stdout, "\n\n You cannot run MPC before [GAC_ONLY] phase. -> ABORT.\n\n"); std::fflush(stdout); g_killed.store(true, std::memory_order_relaxed);}
           else {
             if (ch8_changed && !db_ch8.mid()) {
               if(db_ch8.high()) {phase = Phase::RISING;std::fprintf(stdout, "flight state -> [RISING]\n"); std::fflush(stdout);}
@@ -325,8 +320,8 @@ int main() {
           }
         }
 
-        // changing arm position (only GAC_FLIGHT)
-        if(phase == Phase::GAC_FLIGHT || phase == Phase::ARMED || phase == Phase::IDLE) {
+        // changing arm position (only GAC_ONLY)
+        if(phase == Phase::GAC_ONLY || phase == Phase::ARMED || phase == Phase::IDLE) {
           bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
           cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
           cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
@@ -336,7 +331,7 @@ int main() {
         
         // For path mode 
         const int PATH_ON = sbus_frame.ch[6] >= 1300 ? 1 : 0;
-        const int mode_now = (phase == Phase::MRG_YES_COT || phase == Phase::MRG_NO_COT || PATH_ON) ? 1 : 0;
+        const int mode_now = (phase == Phase::USE_FULL || phase == Phase::USE_ARM || PATH_ON) ? 1 : 0;
         const int mode_prev = last_mode;
         static int mode_changed = 0;
         if (mode_prev == 1 && mode_now == 0) mode_changed = 1;
@@ -408,51 +403,14 @@ int main() {
     gac.position_control();
     const Eigen::Matrix3d R_raw = gac_cmd.Rd;
     const Eigen::Vector3d omega_raw = gac_cmd.Wd;
-    const double F_des = -gac.f_total; // (f_total > 0)
+    const Eigen::Vector3d alpha_raw = gac_cmd.Wd_dot;
+    const double f_sum = -gac.f_total; // (f_total > 0)
     
-    // ==== MRG CALC ====
-    const Eigen::Vector3d euler_rpy = R_to_rpy(s.R);
-    { // MPC send
-      if (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT) {
-        std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
-        if (!g_mpc_busy && !g_mpc_input.has && !g_mpc_output.has) { // push next solve immediately after the previous output
-          mpc_key += 1;
-
-          int k = 0; // fill initial state(x)
-          g_mpc_input.x_0(k++) = euler_rpy(0); g_mpc_input.x_0(k++) = euler_rpy(1); g_mpc_input.x_0(k++) = euler_rpy(2); // theta(0,1,2)
-          g_mpc_input.x_0(k++) = s.omega(0); g_mpc_input.x_0(k++) = s.omega(1); g_mpc_input.x_0(k++) = s.omega(2); // omega(3,4,5)
-          g_mpc_input.x_0(k++) = s.r1(0); g_mpc_input.x_0(k++) = s.r2(0); g_mpc_input.x_0(k++) = s.r3(0); g_mpc_input.x_0(k++) = s.r4(0); // r_rotor_x(6,7,8,9)
-          g_mpc_input.x_0(k++) = s.r1(1); g_mpc_input.x_0(k++) = s.r2(1); g_mpc_input.x_0(k++) = s.r3(1); g_mpc_input.x_0(k++) = s.r4(1); // r_rotor_y(10,11,12,13)
-          g_mpc_input.x_0(k++) = cmd.d_theta(0); g_mpc_input.x_0(k++) = cmd.d_theta(1); g_mpc_input.x_0(k++) = cmd.d_theta(2); // delta_theta(14,15,16)
-          g_mpc_input.x_0(k++) = cmd.r1(0); g_mpc_input.x_0(k++) = cmd.r2(0); g_mpc_input.x_0(k++) = cmd.r3(0); g_mpc_input.x_0(k++) = cmd.r4(0); // r_rotor_cmd_x(17,18,19,20)
-          g_mpc_input.x_0(k++) = cmd.r1(1); g_mpc_input.x_0(k++) = cmd.r2(1); g_mpc_input.x_0(k++) = cmd.r3(1); g_mpc_input.x_0(k++) = cmd.r4(1); // r_rotor_cmd_y(21,22,23,24)
-
-          // fill initial control input(u)
-          for (int l=0; l<11; ++l) {g_mpc_input.u_0(l) = l_mpc_output.u_rate(l, 0);}
-
-          int m = 0; // fill initial parameter(p)
-          for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = R_raw(i, j);}} // R_raw(0~8), column-major order to match CasADi reshape
-          g_mpc_input.p(m++) = omega_raw(0); g_mpc_input.p(m++) = omega_raw(1); g_mpc_input.p(m++) = omega_raw(2); // omega_raw(9~11)
-          g_mpc_input.p(m++) = -gac.f_total; // T_des(12)
-
-          if (phase==Phase::MRG_YES_COT) {g_mpc_input.use_cot = true;}
-          else {g_mpc_input.use_cot = false;}
-
-          g_mpc_input.steps_req = param::N_STEPS_REQ;
-          g_mpc_input.t = now;
-          g_mpc_input.key = mpc_key;
-          g_mpc_input.epoch = g_mpc_epoch.load(std::memory_order_relaxed);
-          g_mpc_input.has = true;
-          g_mpc_busy = true;
-          mpc_cv.notify_one();
-        }
-      }
-    }
-
+    // ==== ACADOS SOLVE ====
+    const bool mpc_on = (phase == Phase::USE_DTHETA || phase == Phase::USE_ARM || phase == Phase::USE_FULL);
     { // MPC get
       std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
       if (g_mpc_output.has) {
-        const bool mpc_on = (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT);
         const bool epoch_ok = (g_mpc_output.epoch == g_mpc_epoch.load(std::memory_order_relaxed));
         const bool key_ok = (g_mpc_output.key == mpc_key);
         const bool solve_ok = (g_mpc_output.state == 0);
@@ -465,53 +423,111 @@ int main() {
       }
     }
 
-    if (phase == Phase::MRG_NO_COT || phase == Phase::MRG_YES_COT) { // MPC unpack
+    bool acados_good = false;
+    if (mpc_on) { // MPC unpack
       const bool epoch_ok = (l_mpc_output.epoch == g_mpc_epoch.load(std::memory_order_relaxed));
       const bool time_ok = ((now - l_mpc_output.t) < param::MPC_TIMEOUT_DURATUION);
       const bool solve_ok = (l_mpc_output.state == 0);
+
       if (epoch_ok && time_ok && solve_ok) {
         const std::size_t idx = static_cast<std::size_t>(std::floor(std::chrono::duration<double>(now - l_mpc_output.t).count() / param::MPC_STEP_DT));
-        cmd.d_theta = l_mpc_output.u_opt.col(idx).head<3>();
-        cmd.r1(0) = l_mpc_output.u_opt(3, idx); cmd.r1(1) = l_mpc_output.u_opt(7, idx);
-        cmd.r2(0) = l_mpc_output.u_opt(4, idx); cmd.r2(1) = l_mpc_output.u_opt(8, idx);
-        cmd.r3(0) = l_mpc_output.u_opt(5, idx); cmd.r3(1) = l_mpc_output.u_opt(9, idx);
-        cmd.r4(0) = l_mpc_output.u_opt(6, idx); cmd.r4(1) = l_mpc_output.u_opt(10, idx);
-        // if (!workspace_guard(cmd.r1, cmd.r2, cmd.r3, cmd.r4)) {
-        //   // cmd.d_theta *= param::GOES_2_ZERO_A;
-        //   // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
-        //   // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
-        //   // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
-        //   // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
-        //   // l_mpc_output.u_rate.setZero();
-        //   l_mpc_output.state = 1;
-        // }
-      }
-      else { // solve failed timeout
-        cmd.d_theta *= param::GOES_2_ZERO_A;
-        // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
-        // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
-        // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
-        // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
-        l_mpc_output.u_rate.setZero();
+
+        Eigen::Vector2d p1, p2, p3, p4; // polar opt r_cmd
+        std::array<Eigen::Vector2d, 4> opt_r; // cartesian opt r_cmd
+        p1 << l_mpc_output.u_opt(3, idx),  l_mpc_output.u_opt(4, idx);
+        p2 << l_mpc_output.u_opt(5, idx),  l_mpc_output.u_opt(6, idx);
+        p3 << l_mpc_output.u_opt(7, idx),  l_mpc_output.u_opt(8, idx);
+        p4 << l_mpc_output.u_opt(9, idx),  l_mpc_output.u_opt(10, idx);
+        polar2cart(p1, p2, p3, p4, opt_r[0], opt_r[1], opt_r[2], opt_r[3]);
+        const bool is_feasible = make_feasible(opt_r); // check workspace & collision
+
+        if (is_feasible) {
+          cmd.d_theta = l_mpc_output.u_opt.col(idx).head<3>();
+          cmd.r1(0) = opt_r[0](0); cmd.r1(1) = opt_r[0](1);
+          cmd.r2(0) = opt_r[1](0); cmd.r2(1) = opt_r[1](1);
+          cmd.r3(0) = opt_r[2](0); cmd.r3(1) = opt_r[2](1);
+          cmd.r4(0) = opt_r[3](0); cmd.r4(1) = opt_r[3](1);
+          acados_good = true;
+        }
       }
     }
-    else { // only GAC flight
+    
+    if (!acados_good) { // [GAC flight] or [solve failed timeout] or [cannot make_feasible]
       cmd.d_theta *= param::GOES_2_ZERO_A;
-      // cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
-      // cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
-      // cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
-      // cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
-      l_mpc_output.u_rate.setZero();
+      cmd.r1 = param::GOES_2_ZERO_A*cmd.r1 + param::GOES_2_ZERO_B*param::r1_init;
+      cmd.r2 = param::GOES_2_ZERO_A*cmd.r2 + param::GOES_2_ZERO_B*param::r2_init;
+      cmd.r3 = param::GOES_2_ZERO_A*cmd.r3 + param::GOES_2_ZERO_B*param::r3_init;
+      cmd.r4 = param::GOES_2_ZERO_A*cmd.r4 + param::GOES_2_ZERO_B*param::r4_init;
+      l_mpc_output.u_stage.setZero();
+    }
+
+    const Eigen::Vector3d euler_rpy = R_to_rpy(s.R);
+    if (mpc_on) { // MPC send
+      Eigen::Vector2d s_p1, s_p2, s_p3, s_p4;
+      Eigen::Vector2d c_p1, c_p2, c_p3, c_p4;
+      cart2polar(s.r1, s.r2, s.r3, s.r4, s_p1, s_p2, s_p3, s_p4);
+      cart2polar(cmd.r1, cmd.r2, cmd.r3, cmd.r4, c_p1, c_p2, c_p3, c_p4);
+      std::lock_guard<std::mutex> mpc_lk(mpc_mtx);
+      if (!g_mpc_busy && !g_mpc_input.has && !g_mpc_output.has) { // push next solve immediately after the previous output
+        mpc_key += 1;
+
+        uint8_t k = 0; // fill initial state(x)
+        g_mpc_input.x_0(k++) = euler_rpy(0); g_mpc_input.x_0(k++) = euler_rpy(1); g_mpc_input.x_0(k++) = euler_rpy(2); // theta(0,1,2)
+        g_mpc_input.x_0(k++) = s.omega(0); g_mpc_input.x_0(k++) = s.omega(1); g_mpc_input.x_0(k++) = s.omega(2); // omega(3,4,5)
+        g_mpc_input.x_0(k++) = s_p1(0); g_mpc_input.x_0(k++) = s_p1(1);
+        g_mpc_input.x_0(k++) = s_p2(0); g_mpc_input.x_0(k++) = s_p2(1);
+        g_mpc_input.x_0(k++) = s_p3(0); g_mpc_input.x_0(k++) = s_p3(1);
+        g_mpc_input.x_0(k++) = s_p4(0); g_mpc_input.x_0(k++) = s_p4(1); // r_rotor(6~13)
+        g_mpc_input.x_0(k++) = c_p1(0); g_mpc_input.x_0(k++) = c_p1(1);
+        g_mpc_input.x_0(k++) = c_p2(0); g_mpc_input.x_0(k++) = c_p2(1);
+        g_mpc_input.x_0(k++) = c_p3(0); g_mpc_input.x_0(k++) = c_p3(1);
+        g_mpc_input.x_0(k++) = c_p4(0); g_mpc_input.x_0(k++) = c_p4(1); // r_rotor_cmd_x(14~21)
+
+        uint8_t l = 0; // fill initial input(u) guess
+        g_mpc_input.u_0(l++) = cmd.d_theta(0); // delta_theta_cmd(0:3)
+        g_mpc_input.u_0(l++) = cmd.d_theta(1);
+        g_mpc_input.u_0(l++) = cmd.d_theta(2);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(3, 0); // r_rotor_cmd_rate(3:11)
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(4, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(5, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(6, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(7, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(8, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(9, 0);
+        g_mpc_input.u_0(l++) = l_mpc_output.u_stage(10, 0);
+
+        uint8_t m = 0; // fill initial parameter(p)
+        for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = R_raw(i, j);}} // R_raw(0~8), column-major order to match CasADi reshape
+        g_mpc_input.p(m++) = omega_raw(0); g_mpc_input.p(m++) = omega_raw(1); g_mpc_input.p(m++) = omega_raw(2); // omega_raw(9~11)
+        g_mpc_input.p(m++) = alpha_raw(0); g_mpc_input.p(m++) = alpha_raw(1); g_mpc_input.p(m++) = alpha_raw(2); // alpha_raw(12~14)
+        for (int j=0; j<3; ++j) {for (int i=0; i<3; ++i) {g_mpc_input.p(m++) = s.R(i, j);}} // R_0(15~23), column-major order to match CasADi reshape
+        g_mpc_input.p(m++) = -f_sum; // positive, f_sum(24)
+        // g_mpc_input.p(m++) = std::clamp(-f_sum, 4.0*param::PWM_B, 4.0*(param::SATURATION_THRUST-0.3)); // projected_positive, f_sum(24)
+        
+        if (phase==Phase::USE_FULL)        {g_mpc_input.use_delta = true;  g_mpc_input.use_arm = true; }
+        else if (phase==Phase::USE_DTHETA) {g_mpc_input.use_delta = true;  g_mpc_input.use_arm = false;}
+        else if (phase==Phase::USE_ARM)    {g_mpc_input.use_delta = false; g_mpc_input.use_arm = true; }
+        else                               {g_mpc_input.use_delta = false; g_mpc_input.use_arm = false;}
+
+        g_mpc_input.steps_req = param::N_STEPS_REQ;
+        g_mpc_input.t = now;
+        g_mpc_input.key = mpc_key;
+        g_mpc_input.epoch = g_mpc_epoch.load(std::memory_order_relaxed);
+        g_mpc_input.has = true;
+        g_mpc_busy = true;
+        mpc_cv.notify_one();
+      }
     }
 
     // ==== ATTITUDE CONTROL ====
+    // TODO : fix Geometry controller
     const Eigen::Matrix3d R_d = R_raw * expm_hat(cmd.d_theta);
     Eigen::Vector3d tau_des = gac.attitude_control(R_d);
     
     // ==== CONTORL ALLOCATION ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (thrust_des > 0)
     Eigen::Vector4d tilt_ang_des = Eigen::Vector4d::Zero();
-    Sequential_Allocation(F_des, tau_des, cmd.tauz_bar, s.arm_q, s.r_com, thrust_des, tilt_ang_des);
+    Sequential_Allocation(f_sum, tau_des, cmd.tauz_bar, s.arm_q, s.r_com, thrust_des, tilt_ang_des);
 
     // --- thruster constraint ---
     Eigen::Vector4d thrust_cmd   = Eigen::Vector4d::Zero(); // (thrust_cmd > 0)
@@ -519,19 +535,8 @@ int main() {
 
     // --- get joint angle commands ---
     double q_d[20] = {0};
-    //IK(param::r1_init, param::r2_init, param::r3_init, param::r4_init, tilt_ang_des, q_d);
-
-    // --- ARM-ws check ---
-    std::array<Eigen::Vector2d, 4> r_cmd = { cmd.r1.head<2>(), cmd.r2.head<2>(), cmd.r3.head<2>(), cmd.r4.head<2>() };
-
-    if (make_feasible(r_cmd)) {
-      cmd.r1.head<2>() = r_cmd[0]; cmd.r2.head<2>() = r_cmd[1]; cmd.r3.head<2>() = r_cmd[2]; cmd.r4.head<2>() = r_cmd[3];
-      r_cmd_prev = r_cmd;
-    } else { 
-      cmd.r1.head<2>() = r_cmd_prev[0]; cmd.r2.head<2>() = r_cmd_prev[1]; cmd.r3.head<2>() = r_cmd_prev[2]; cmd.r4.head<2>() = r_cmd_prev[3]; 
-      printf("[ARM_WS] FALLBACK TO PREVIOUS SAFE CMD\n");
-    }
     IK(cmd.r1, cmd.r2, cmd.r3, cmd.r4, tilt_ang_des, q_d);
+    
     // --- get pwm ---
     Eigen::Vector4d pwm;
     for (int i = 0; i < 4; ++i) {
@@ -558,8 +563,8 @@ int main() {
         if (rising_coeff >= 1.0) {
           rising_coeff = 1.0;
           for (int i = 0; i < 4; ++i) { pwm(i) *= rising_coeff; }
-          phase = Phase::GAC_FLIGHT;
-          std::fprintf(stdout, "flight state -> [GAC_FLIGHT]\n"); std::fflush(stdout);
+          phase = Phase::GAC_ONLY;
+          std::fprintf(stdout, "flight state -> [GAC_ONLY]\n"); std::fflush(stdout);
         }
       } break;
     }
@@ -646,7 +651,7 @@ int main() {
       ld.f_thrst_con[3] = static_cast<float>(thrust_cmd(3));
 
       {
-        const Eigen::Vector2d tau_off(F_des*(s.r_cot(1)-s.r_com(1)), -F_des*(s.r_cot(0)-s.r_com(0)));
+        const Eigen::Vector2d tau_off(f_sum*(s.r_cot(1)-s.r_com(1)), -f_sum*(s.r_cot(0)-s.r_com(0)));
         ld.tau_off[0] = static_cast<float>(tau_off(0));
         ld.tau_off[1] = static_cast<float>(tau_off(1));
       }
