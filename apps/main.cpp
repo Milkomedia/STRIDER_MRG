@@ -344,11 +344,47 @@ int main() {
 
         // changing arm position (only GAC_ONLY)
         if(phase == Phase::GAC_ONLY || phase == Phase::ARMED || phase == Phase::IDLE) {
-          bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
-          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
-          cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
-          cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
-          cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
+          // bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
+          bPcot = Eigen::Vector3d(0.0,0.0,0.0);
+          // cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
+          // cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
+          // cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
+          // cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
+
+          const double q1_cmd = (sbus_frame.ch[11] < 1000) ? -M_PI/30.0 : M_PI/30.0;
+
+          Eigen::Matrix3d Rz = Eigen::Matrix3d::Identity();
+          Rz << std::cos(q1_cmd), -std::sin(q1_cmd), 0.0,
+                std::sin(q1_cmd),  std::cos(q1_cmd), 0.0,
+                0.0,               0.0,              1.0;
+
+          // arm 1
+          {
+            const Eigen::Vector3d b(param::B2BASE_X[0], param::B2BASE_Y[0], param::r1_init.z());
+            const Eigen::Vector3d rho = param::r1_init - b;
+            cmd.r1 = smooth(cmd.r1, b + Rz * rho, 0.01);
+          }
+
+          // arm 2
+          {
+            const Eigen::Vector3d b(param::B2BASE_X[1], param::B2BASE_Y[1], param::r2_init.z());
+            const Eigen::Vector3d rho = param::r2_init - b;
+            cmd.r2 = smooth(cmd.r2, b + Rz * rho, 0.01);
+          }
+
+          // arm 3
+          {
+            const Eigen::Vector3d b(param::B2BASE_X[2], param::B2BASE_Y[2], param::r3_init.z());
+            const Eigen::Vector3d rho = param::r3_init - b;
+            cmd.r3 = smooth(cmd.r3, b + Rz * rho, 0.01);
+          }
+
+          // arm 4
+          {
+            const Eigen::Vector3d b(param::B2BASE_X[3], param::B2BASE_Y[3], param::r4_init.z());
+            const Eigen::Vector3d rho = param::r4_init - b;
+            cmd.r4 = smooth(cmd.r4, b + Rz * rho, 0.01);
+          }
         }
         
         // For path mode 
