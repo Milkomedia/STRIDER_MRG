@@ -163,6 +163,8 @@ int main() {
   l_mpc_output.u_stage.setZero();
   l_mpc_output.u_opt.setZero();
   l_mpc_output.t = std::chrono::steady_clock::time_point::max();
+  Phase prev_phase = Phase::GAC_ONLY;
+  int mpc_to_manual = 0;
   
   // --- PATH parameters ---
   static bool initial_gate = false;
@@ -342,40 +344,51 @@ int main() {
           }
         }
 
+        if ((prev_phase == Phase::USE_ARM || prev_phase == Phase::USE_FULL) && (phase == Phase::GAC_ONLY)) {
+          mpc_to_manual = 1;
+          cmd.pos = s.pos;
+          cmd.r1 = s.r1; cmd.r2 = s.r2; cmd.r3 = s.r3; cmd.r4 = s.r4;
+        }
+
+        prev_phase = phase;
+
         // changing arm position (only GAC_ONLY)
-        if(phase == Phase::GAC_ONLY || phase == Phase::ARMED || phase == Phase::IDLE) {
-          // bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]), 0.0);
-          bPcot = Eigen::Vector3d(0.0,0.0,0.0);
-          // cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, 0.01);
-          // cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, 0.01);
-          // cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, 0.01);
-          // cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, 0.01);
+        if (phase == Phase::GAC_ONLY || phase == Phase::ARMED || phase == Phase::IDLE) {
+          bPcot = Eigen::Vector3d(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]),0.0);
+          double LPF_gain = 0.01;
 
-          const double r_cmd = (sbus_frame.ch[11] < 1000) ? 0.30 : 0.36;   // [m] 0.3~0.4 33이 중간
-          const double xy_cmd = r_cmd * 0.7071067811865474617150084668537601828575; // x=y=r/sqrt(2)
+          if (mpc_to_manual){
+              LPF_gain = 1.0;
+              const bool done =
+                  is_near(s.r1, param::r1_init + bPcot, param::DEFAULT_ARM_TOL) &&
+                  is_near(s.r2, param::r2_init + bPcot, param::DEFAULT_ARM_TOL) &&
+                  is_near(s.r3, param::r3_init + bPcot, param::DEFAULT_ARM_TOL) &&
+                  is_near(s.r4, param::r4_init + bPcot, param::DEFAULT_ARM_TOL) ;
 
-          cmd.r1 = smooth(cmd.r1, Eigen::Vector3d( xy_cmd, -xy_cmd, param::r1_init.z()), 0.01);
-          cmd.r2 = smooth(cmd.r2, Eigen::Vector3d(-xy_cmd, -xy_cmd, param::r2_init.z()), 0.01);
-          cmd.r3 = smooth(cmd.r3, Eigen::Vector3d(-xy_cmd,  xy_cmd, param::r3_init.z()), 0.01);
-          cmd.r4 = smooth(cmd.r4, Eigen::Vector3d( xy_cmd,  xy_cmd, param::r4_init.z()), 0.01);
+              if (done) mpc_to_manual = 0;
+          }
+          cmd.r1 = smooth(cmd.r1, param::r1_init + bPcot, LPF_gain);
+          cmd.r2 = smooth(cmd.r2, param::r2_init + bPcot, LPF_gain);
+          cmd.r3 = smooth(cmd.r3, param::r3_init + bPcot, LPF_gain);
+          cmd.r4 = smooth(cmd.r4, param::r4_init + bPcot, LPF_gain);
         }
         
         // For path mode 
         const int PATH_ON = sbus_frame.ch[6] >= 1300 ? 1 : 0;
-        const int mode_now = (phase == Phase::USE_FULL || phase == Phase::USE_ARM || PATH_ON) ? 1 : 0;
         const int mode_prev = last_mode;
         static int mode_changed = 0;
-        if (mode_prev == 1 && mode_now == 0) mode_changed = 1;
+        if (mode_prev == 1 && PATH_ON == 0) mode_changed = 1;
         
         // For Force constrain
-        saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10]);
+        // saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10]);
+        saturation_thrust = param::SATURATION_THRUST;
 
-        if (mode_now != last_mode) {
-          std::fprintf(stdout, mode_now ? "PATH generator ON\n" : "MANUAL mode ON\n");
+        if (PATH_ON != last_mode) {
+          std::fprintf(stdout, PATH_ON ? "PATH generator ON\n" : "MANUAL mode ON\n");
           std::fflush(stdout);
         }
 
-        if (mode_now) {
+        if (PATH_ON) {
           const bool btn_edge = sbus_path_edge(sbus_frame.ch[5], prev_btn);
           init_manual_to_path(s, cmd, initial_gate);
 
@@ -391,11 +404,11 @@ int main() {
         else {
           if (mode_changed) init_path_to_manual(s, cmd, bPcot, mode_changed);
           else {
-            cmd.pos     = sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]);
+            cmd.pos     = smooth(cmd.pos, sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]), 0.1);
             cmd.heading = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]);
           }
           
-          if (mode_now != last_mode) {
+          if (PATH_ON != last_mode) {
             std::fprintf(stdout, mode_changed ? "INIT DONE\n" : "INITING...\n");
             std::fflush(stdout);
           }
@@ -403,7 +416,7 @@ int main() {
           initial_gate = false;
           last_gate = -1;
         }
-        last_mode = mode_now;
+        last_mode = PATH_ON;
         last_sbus_cnt = cur_sbus_cnt;
       }
     }
@@ -414,7 +427,7 @@ int main() {
       if (dxl.read_latest(dxl_frame)) {
         for(uint8_t i = 0; i < 20; ++i) {s.arm_q[i] = dxl_frame.q_mea[i];}
         FK(s.arm_q, s.r_cot, s.r1, s.r2, s.r3, s.r4);
-        const Eigen::Vector2d r_com_xy = com_estimator(s.arm_q);
+        const Eigen::Vector2d r_com_xy = com_estimator(s.arm_q, s.r_cot);
         s.r_com(0) = r_com_xy(0);
         s.r_com(1) = r_com_xy(1);
         last_dxl_cnt = cur_dxl_cnt;
@@ -423,6 +436,7 @@ int main() {
 
     // ==== POSITION CONTROL ====
     gac_cmd.xd  = cmd.pos;
+    // gac_cmd.xd = s.pos; 
     gac_cmd.xd_dot = cmd.vel;
     gac_cmd.xd_2dot = cmd.acc;
     gac_cmd.b1d = cmd.heading;
@@ -475,10 +489,14 @@ int main() {
 
         if (is_feasible) {
           cmd.d_theta = l_mpc_output.u_opt.col(idx).head<3>();
-          cmd.r1(0) = opt_r[0](0); cmd.r1(1) = opt_r[0](1);
-          cmd.r2(0) = opt_r[1](0); cmd.r2(1) = opt_r[1](1);
-          cmd.r3(0) = opt_r[2](0); cmd.r3(1) = opt_r[2](1);
-          cmd.r4(0) = opt_r[3](0); cmd.r4(1) = opt_r[3](1);
+          const Eigen::Vector3d r1_cmd(opt_r[0](0), opt_r[0](1), -0.24);
+          const Eigen::Vector3d r2_cmd(opt_r[1](0), opt_r[1](1), -0.24);
+          const Eigen::Vector3d r3_cmd(opt_r[2](0), opt_r[2](1), -0.24);
+          const Eigen::Vector3d r4_cmd(opt_r[3](0), opt_r[3](1), -0.24);
+          cmd.r1 = smooth(cmd.r1, r1_cmd, 0.1);
+          cmd.r2 = smooth(cmd.r2, r2_cmd, 0.1);
+          cmd.r3 = smooth(cmd.r3, r3_cmd, 0.1);
+          cmd.r4 = smooth(cmd.r4, r4_cmd, 0.1);
           acados_good = true;
         }
       }
@@ -557,6 +575,7 @@ int main() {
     const Eigen::Vector3d Wd = Et * omega_raw;
     const Eigen::Vector3d Wd_dot = Et * alpha_raw;
     const Eigen::Vector3d tau_des = gac.attitude_control(Rd, Wd, Wd_dot);
+    // const Eigen::Vector3d tau_des = gac.attitude_control(R_raw, omega_raw, alpha_raw);
     
     // ==== CONTORL ALLOCATION ====
     Eigen::Vector4d thrust_des   = Eigen::Vector4d::Zero(); // (thrust_des > 0)

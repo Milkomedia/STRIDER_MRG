@@ -29,7 +29,7 @@ static constexpr double kW[3]  = {11.0, 11.0,  5.50}; // angular Velocity gain [
 // ===== UAV Parameter =====
 static constexpr double Jx_bar = 0.138;  // Nominal : bar 0.068 + Mass 0.07 = 0.138 [kg m^2] 
 static constexpr double Jz_bar = 0.138;  // Nominal : bar 0.068 + Mass 0.07 = 0.138 [kg m^2]
-static constexpr double M_bar  = 1.0;   // Nominal : bar 0.460 + Mass 0.47    = 0.93 [Kg]
+static constexpr double M_bar  = 0.885;  // Nominal : bar 0.450 + Mass 0.415 = 0.865 [Kg]
 
 static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
@@ -38,14 +38,14 @@ static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
 static constexpr double M  = 7.40 + M_bar;    // [kg]
 static constexpr double G  = 9.80665;         // [m/s^2] (must be positive)
 
-inline constexpr double COM_OFF_X   = +0.00; // distance from the body frame to com position (x) [m]
-inline constexpr double COM_OFF_Y   = -0.03; // distance from the body frame to com position (y) [m]
+inline constexpr double PAYLOAD_COM_OFF_X   = -0.0; // distance from the body frame to PAYLOAD CoM position (x) [m]
+inline constexpr double PAYLOAD_COM_OFF_Y   = -0.2; // distance from the body frame to PAYLOAD CoM position (y) [m]
 
 static constexpr double SATURATION_THRUST  = 40; // (85%) Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====
 static constexpr double M_link[5] = {0.374106, 0.13658, 0.0415148, 0.102003, 0.3734}; //each link mass [kg]
-static constexpr double M_body = 1.6845345+1.0;   // center body + load mass [kg]
+static constexpr double M_bodys = 1.4895848 + M_bar;   // center body + load mass [kg]
 
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable
@@ -76,7 +76,7 @@ static constexpr double SBUS_X_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Y_RANGE       = 1.0;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Z_RANGE       = 1.3;   // [m] k mapped to [ 0, -k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
-static constexpr double SBUS_COTXY_RANGE[2] = {-0.04, 0.04};  // [m]
+static constexpr double SBUS_COTXY_RANGE[2] = {-0.048, 0.048};  // [m]
 
 // ===== OptiTrack offsets =====
 static constexpr double OPTI_X_OFFSET  = -0.380; // [m] Opti perspective coordinate system
@@ -100,7 +100,7 @@ inline const     Eigen::Vector3d r2_init       = Eigen::Vector3d(-0.24, -0.24, -
 inline const     Eigen::Vector3d r3_init       = Eigen::Vector3d(-0.24,  0.24, -0.24); // rotor-3 inital position
 inline const     Eigen::Vector3d r4_init       = Eigen::Vector3d( 0.24,  0.24, -0.24); // rotor-4 inital position
 
-inline constexpr double MPC_OFF_TIME_CONSTANT = 0.8; // [sec] each arm goes to initial position when MPC-off or Solve-failed
+inline constexpr double MPC_OFF_TIME_CONSTANT = 3.0; // [sec] each arm goes to initial position when MPC-off or Solve-failed
 inline const     double GOES_2_ZERO_A         = std::exp(-std::chrono::duration_cast<std::chrono::duration<double>>(CTRL_DT).count() / MPC_OFF_TIME_CONSTANT); // not a tunable parameter
 inline const     double GOES_2_ZERO_B         = 1.0 - GOES_2_ZERO_A;                        // not a tunable parameter
 
@@ -144,8 +144,8 @@ static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(-OPTI_X_
 
 static constexpr double DEFAULT_POS_TOL             = 0.01;  // [m]
 static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
-static constexpr double PATH_T_MOVE                 = 1.5;
-static constexpr double PATH_SETTLE_MAX             = 1.5;
+static constexpr double PATH_T_MOVE                 = 3.0; //1.5
+static constexpr double PATH_SETTLE_MAX             = 3.0;
 
 // ===== RT Scheduling & CPU IDs =====
 static constexpr int MAIN_PRIOR = 90;
@@ -163,8 +163,8 @@ static constexpr int CPU_DXL  = 21;
 static constexpr int CPU_SBUS = 21;
 
 // ===== Sensor & Actuator hardcoded config =====
-static constexpr const char* SBUS_PORT_NAME = "/dev/ttyUSB0";
-static constexpr const char* DXL_PORT_NAME  = "/dev/ttyUSB1";
+static constexpr const char* SBUS_PORT_NAME = "/dev/ttyUSB1";
+static constexpr const char* DXL_PORT_NAME  = "/dev/ttyUSB0";
 static constexpr const char* CAN_PORT_NAME  = "can0";
 static constexpr const char* MOCAP_TYPE     = "optitrack";
 static constexpr const char* OPTI_IP        = "192.168.10.115";

@@ -364,13 +364,14 @@ static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3
   bpcot *= 0.25;
 }
 
-static inline Eigen::Vector2d com_estimator(const double arm_q[20]) {
+static inline Eigen::Vector2d com_estimator(const double arm_q[20], const Eigen::Vector3d bpcot) {
   Eigen::Vector2d moment = Eigen::Vector2d::Zero();
+  Eigen::Vector2d r_com = Eigen::Vector2d::Zero();
 
   double M_link = 0.0;
   for (int i = 0; i < 5; i++) M_link += param::M_link[i];
 
-  const double M_total = param::M_body + 4.0 * M_link;
+  const double M_total = param::M_bodys + 4.0 * M_link;
 
   for (int arm = 0; arm < 4; ++arm) {
     int k = 5 * arm;
@@ -394,10 +395,9 @@ static inline Eigen::Vector2d com_estimator(const double arm_q[20]) {
     moment(1) += M_link * param::B2BASE_A[arm] * std::sin(param::B2BASE_THETA[arm]) + moment_rho * std::sin(phi);
   }
 
-  Eigen::Vector2d r_com = moment / M_total;
-  r_com(0) += param::COM_OFF_X;
-  r_com(1) += param::COM_OFF_Y;
-
+  moment(0) += param::M_bar*param::PAYLOAD_COM_OFF_X;
+  moment(1) += param::M_bar*param::PAYLOAD_COM_OFF_Y;
+  r_com = moment / M_total;
   return r_com;
 }
 
