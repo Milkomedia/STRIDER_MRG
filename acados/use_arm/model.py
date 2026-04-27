@@ -55,7 +55,7 @@ def build_model():
     m_link = ca.reshape(ca.DM(np.asarray(p.M_LINK, dtype=np.float64)), 5, 1)
     m_link_sum = ca.sum1(m_link)
     inv_m_tot = 1.0 / (ca.DM(float(p.M_CENTER)) + 4.0 * m_link_sum)
-    center_body_com = ca.vertcat(float(p.COM_BIAS_OF_LOAD), 0.0)
+    center_body_com = ca.vertcat(0.0, -float(p.COM_BIAS_OF_LOAD))
     a1 = float(p.A_LINK[0])
     a2 = float(p.A_LINK[1])
     a3 = float(p.A_LINK[2])

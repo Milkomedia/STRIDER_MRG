@@ -1,8 +1,8 @@
 import numpy as np
 
 # MPC horizon
-N  = 150     # number of steps
-DT = 1.0 / 100  # [s] (of each step)
+N  = 200     # number of steps
+DT = 1.0 / 75.0  # [s] (of each step)
 
 # ---------- model parameters ----------
 J_TENSOR = np.array([
@@ -18,17 +18,17 @@ KW = np.array([11.0, 11.0,  5.5])
 # control allocation
 # real model uses thrust-based yaw (sequential allocation). but mpc model uses reaction-based yaw.
 # To compensate this, mpc's allocation thinks that less thrust deviation produces more reaction torque.
-ZETA = 0.1
+ZETA = 0.5
 
 # IK & CoM estimate
 M_LINK   = np.array([0.374106, 0.13658, 0.0415148, 0.102003, 0.3734]) # each link mass [kg]
-M_CENTER = 2.6845345                                                  # center body + load mass [kg]
-COM_BIAS_OF_LOAD = 0.1875                                             # load-link length * load wieght [kg*m]
+M_CENTER = 2.80958                                                    # center body 1.48958 + load mass 1.32[kg]
+COM_BIAS_OF_LOAD = 0.165*1.32                                         # load-link length * load wieght [kg*m]
 
 # ---------- use_arm & use_full parameters ----------
 # CoT actuator time constant
-TAU_BASE = 0.25
-TAU_ARM  = 0.15
+TAU_BASE = 0.5
+TAU_ARM  = 0.1
 
 R_OFF_X = np.array([ 0.12, -0.12, -0.12,  0.12])/np.sqrt(2)
 R_OFF_Y = np.array([-0.12, -0.12,  0.12,  0.12])/np.sqrt(2)

@@ -43,7 +43,7 @@ def build_model():
 
     m_link = ca.reshape(ca.DM(np.asarray(p.M_LINK, dtype=np.float64)), 5, 1)
     inv_m_tot = 1.0 / (ca.DM(float(p.M_CENTER)) + 4.0 * ca.sum1(m_link))
-    center_body_com = ca.vertcat(float(p.COM_BIAS_OF_LOAD), 0.0)
+    center_body_com = ca.vertcat(0.0, -float(p.COM_BIAS_OF_LOAD))
 
     # ---------- math utils ----------
     def euler_zyx_to_R(theta: ca.SX) -> ca.SX:
@@ -159,6 +159,11 @@ def build_ocp():
     ocp.constraints.lh   = np.asarray(c.F_MIN, dtype=np.float64)
     ocp.constraints.uh   = np.asarray(c.F_MAX, dtype=np.float64)
     ocp.dims.nh   = 4
+
+    # ---------- u box constraints (delta_theta_cmd bound) ----------
+    ocp.constraints.lbu   = np.asarray(c.DELTA_MIN, dtype=np.float64)
+    ocp.constraints.ubu   = np.asarray(c.DELTA_MAX, dtype=np.float64)
+    ocp.constraints.idxbu = np.arange(3)
 
     # ---------- solver options ----------
     ocp.solver_options.qp_solver        = "PARTIAL_CONDENSING_HPIPM" # or "FULL_CONDENSING_HPIPM(5ms)" "PARTIAL_CONDENSING_HPIPM"(3ms) "FULL_CONDENSING_QPOASES(6ms)"

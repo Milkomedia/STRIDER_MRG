@@ -17,7 +17,7 @@ import pyqtgraph as pg
 import numpy as np
 import math
 
-FC_THRUST_HZ = 1
+FC_THRUST_HZ = 1.0
 
 pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
@@ -1279,9 +1279,9 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._curves["yaw_act"]   = p2c3.plot(pen=pen_act, name="act")
 
     # ========== 1-Row 3: tau ==========
-    p3c1 = _mk_plot(self.glw1, 2, 0, "tau_x [N·m]", y_range=(-1.5, 1.5))
-    p3c2 = _mk_plot(self.glw1, 2, 1, "tau_y [N·m]", y_range=(-6., 11.))
-    p3c3 = _mk_plot(self.glw1, 2, 2, "tau_z [N·m]", y_range=(-1., 1.))
+    p3c1 = _mk_plot(self.glw1, 2, 0, "tau_x [N·m]", y_range=(-6., 6.))
+    p3c2 = _mk_plot(self.glw1, 2, 1, "tau_y [N·m]", y_range=(-2., 2.))
+    p3c3 = _mk_plot(self.glw1, 2, 2, "tau_z [N·m]", y_range=(-2., 2.))
 
     self._curves["tau_x_off"]    = p3c1.plot(pen=pen_cot,   name="off-d")
     self._curves["tau_x_thrust"] = p3c1.plot(pen=pen_thr,   name="thrust")
@@ -1300,7 +1300,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
     # ========== 1-Row 4: f1234 / tilt / f_total ==========
     p4c1 = _mk_plot(self.glw1, 3, 0,  "r_cot [mm]", y_range=(-120., 120.))
-    p4c2 = _mk_plot(self.glw1, 3, 1, "f_thrst [N]", y_range=(10. , 30.))
+    p4c2 = _mk_plot(self.glw1, 3, 1, "f_thrst [N]", y_range=(15. , 40.))
     p4c3 = _mk_plot(self.glw1, 3, 2, "f_total [N]", y_range=(40., 100.))
 
     self._curves["rcot_x_cmd"] = p4c1.plot(pen=pen_rcot_x_cmd, name="cmd x")

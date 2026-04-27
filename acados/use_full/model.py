@@ -57,7 +57,7 @@ def build_model():
     m_link = ca.reshape(ca.DM(np.asarray(p.M_LINK, dtype=np.float64)), 5, 1)
     m_link_sum = ca.sum1(m_link)
     inv_m_tot = 1.0 / (ca.DM(float(p.M_CENTER)) + 4.0 * m_link_sum)
-    center_body_com = ca.vertcat(float(p.COM_BIAS_OF_LOAD), 0.0)
+    center_body_com = ca.vertcat(0.0, -float(p.COM_BIAS_OF_LOAD))
     a1 = float(p.A_LINK[0])
     a2 = float(p.A_LINK[1])
     a3 = float(p.A_LINK[2])
@@ -258,15 +258,17 @@ def build_ocp():
     ocp.dims.nbx = ocp.constraints.idxbx.size
 
     # ---- box constraints on u ----
-    ocp.constraints.idxbu = np.array([3, 4, 5, 6, 7, 8, 9, 10], dtype=np.int64)
+    ocp.constraints.idxbu = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=np.int64)
 
     ocp.constraints.lbu = np.array([
+        c.DELTA_MIN[0],     c.DELTA_MIN[1],     c.DELTA_MIN[2],
         c.RHO_DOT_MIN[0],   c.ALPHA_DOT_MIN[0],
         c.RHO_DOT_MIN[1],   c.ALPHA_DOT_MIN[1],
         c.RHO_DOT_MIN[2],   c.ALPHA_DOT_MIN[2],
         c.RHO_DOT_MIN[3],   c.ALPHA_DOT_MIN[3],
     ], dtype=np.float64)
     ocp.constraints.ubu = np.array([
+        c.DELTA_MAX[0],     c.DELTA_MAX[1],     c.DELTA_MAX[2],
         c.RHO_DOT_MAX[0],   c.ALPHA_DOT_MAX[0],
         c.RHO_DOT_MAX[1],   c.ALPHA_DOT_MAX[1],
         c.RHO_DOT_MAX[2],   c.ALPHA_DOT_MAX[2],
