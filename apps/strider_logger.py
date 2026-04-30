@@ -14,52 +14,8 @@ from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush
 import pyqtgraph as pg
 
-import numpy as np
-import math
-
-FC_THRUST_HZ = 1.0
-
 pg.setConfigOption("background", "w")
 pg.setConfigOption("foreground", "k")
-
-
-def lpf_1pole(x: np.ndarray, t: np.ndarray, fc_hz: float) -> np.ndarray:
-    """
-    1st-order low-pass, causal.
-    y[k] = y[k-1] + a*(x[k]-y[k-1]),  a = 1-exp(-2*pi*fc*dt)
-    - x,t: same length
-    - fc_hz <= 0 -> no filtering
-    """
-    if fc_hz is None or fc_hz <= 0:
-        return x
-
-    x = np.asarray(x, dtype=np.float64)
-    t = np.asarray(t, dtype=np.float64)
-    n = x.size
-    if n == 0:
-        return x
-
-    # robust dt (handle jitter)
-    if n >= 2:
-        dt = np.diff(t)
-        dt = dt[np.isfinite(dt)]
-        dt_med = float(np.median(dt)) if dt.size else 0.0
-    else:
-        dt_med = 0.0
-
-    if dt_med <= 0:
-        return x
-
-    a = 1.0 - math.exp(-2.0 * math.pi * float(fc_hz) * dt_med)
-
-    y = np.empty_like(x)
-    y[0] = x[0]
-    for k in range(1, n):
-        if not np.isfinite(x[k]):
-            y[k] = y[k-1]
-        else:
-            y[k] = y[k-1] + a * (x[k] - y[k-1])
-    return y
 
 class InteractiveViewBox(pg.ViewBox):
   """
@@ -384,8 +340,8 @@ _M2MM    = np.float32(1000.0)
 # -----------------------------
 # Must match C++ mmap_manager.hpp
 # -----------------------------
-MAGIC = b"STRLOG2\x00"
-VERSION = 2
+MAGIC = b"STRLOG4\x00"
+VERSION = 4
 
 # LogData offsets (packed, little-endian) float32 = 4 bytes, int32 = 4 bytes, uint8 = 1 byte
 OFF_T          = 0    # float t
@@ -397,36 +353,38 @@ OFF_VEL        = 52   # float vel[3]
 OFF_ACC        = 64   # float acc[3]
 OFF_RPY_RAW    = 76   # float rpy_raw[3]
 OFF_RPY_D      = 88   # float rpy_d[3]
-OFF_OMEGA_D    = 100  # float omega_d[3]
-OFF_ALPHA_D    = 112  # float alpha_d[3]
-OFF_RPY        = 124  # float rpy[3]
-OFF_OMEGA      = 136  # float omega[3]
-OFF_ALPHA      = 148  # float alpha[3]
-OFF_F_DES      = 160  # float f_total
-OFF_TAU_D      = 164  # float tau_d[3]
-OFF_TAU_Z_T    = 176  # float tau_z_t
-OFF_TILT       = 180  # float tilt_rad[4]
-OFF_F_THRST    = 196  # float f_thrst[4]
-OFF_F_THRST_CON= 212  # float f_thrst_con[4]
-OFF_TAU_OFF    = 228  # float tau_off[2]
-OFF_TAU_THRUST = 236  # float tau_thrust[3]
-OFF_R_ROTOR1   = 248  # float r_rotor1[2]
-OFF_R_ROTOR2   = 256  # float r_rotor2[2]
-OFF_R_ROTOR3   = 264  # float r_rotor3[2]
-OFF_R_ROTOR4   = 272  # float r_rotor4[2]
-OFF_R_COT      = 280  # float r_cot[2]
-OFF_R_ROTOR1_D = 288  # float r_rotor1_d[2]
-OFF_R_ROTOR2_D = 296  # float r_rotor2_d[2]
-OFF_R_ROTOR3_D = 304  # float r_rotor3_d[2]
-OFF_R_ROTOR4_D = 312  # float r_rotor4_d[2]
-OFF_R_COT_D    = 320  # float r_cot_d[2]
-OFF_Q          = 328  # float q[20]
-OFF_Q_CMD      = 408  # float q_cmd[20]
-OFF_SOLVE_MS   = 488  # float solve_ms
-OFF_SOLVE_STATUS = 492 # int32 solve_status
-OFF_PHASE      = 496  # uint8 phase
+OFF_OMEGA_RAW  = 100  # float omega_raw[3]
+OFF_OMEGA_D    = 112  # float omega_d[3]
+OFF_ALPHA_RAW  = 124  # float alpha_raw[3]
+OFF_ALPHA_D    = 136  # float alpha_d[3]
+OFF_RPY        = 148  # float rpy[3]
+OFF_OMEGA      = 160  # float omega[3]
+OFF_ALPHA      = 172  # float alpha[3]
+OFF_F_DES      = 184  # float f_total
+OFF_TAU_D      = 188  # float tau_d[3]
+OFF_TAU_Z_T    = 200  # float tau_z_t
+OFF_TILT       = 204  # float tilt_rad[4]
+OFF_F_THRST    = 220  # float f_thrst[4]
+OFF_F_THRST_CON= 236  # float f_thrst_con[4]
+OFF_TAU_OFF    = 252  # float tau_off[2]
+OFF_TAU_THRUST = 260  # float tau_thrust[3]
+OFF_R_ROTOR1   = 272  # float r_rotor1[2]
+OFF_R_ROTOR2   = 280  # float r_rotor2[2]
+OFF_R_ROTOR3   = 288  # float r_rotor3[2]
+OFF_R_ROTOR4   = 296  # float r_rotor4[2]
+OFF_R_COT      = 304  # float r_cot[2]
+OFF_R_ROTOR1_D = 312  # float r_rotor1_d[2]
+OFF_R_ROTOR2_D = 320  # float r_rotor2_d[2]
+OFF_R_ROTOR3_D = 328  # float r_rotor3_d[2]
+OFF_R_ROTOR4_D = 336  # float r_rotor4_d[2]
+OFF_R_COT_D    = 344  # float r_cot_d[2]
+OFF_Q          = 352  # float q[20]
+OFF_Q_CMD      = 432  # float q_cmd[20]
+OFF_SOLVE_MS   = 512  # float solve_ms
+OFF_SOLVE_STATUS = 516 # int32 solve_status
+OFF_PHASE      = 520  # uint8 phase
 
-LOGDATA_SIZE = 497  # sizeof(LogData) with #pragma pack(1)
+LOGDATA_SIZE = 521  # sizeof(LogData) with #pragma pack(1)
 HEADER_SIZE = 64
 _SLOT_PAD = (8 - (LOGDATA_SIZE % 8)) % 8
 SLOT_SIZE = 8 + LOGDATA_SIZE + _SLOT_PAD  # seq(u64)=8 + LogData + pad -> multiple of 8
@@ -523,7 +481,7 @@ class MMapReader:
       seq_a = self._u64(slot_off + 0)
       if seq_a & 1: continue
 
-      # NOTE: zero-copy view (avoid allocating/copying 497 bytes per slot)
+      # NOTE: zero-copy view (avoid allocating/copying LOGDATA_SIZE bytes per slot)
       dbuf = self._mv[slot_off + 8: slot_off + 8 + LOGDATA_SIZE]
 
       seq_b = self._u64(slot_off + 0)
@@ -540,8 +498,10 @@ class MMapReader:
       out_ch["rpy"][i, :] = _S_FFF.unpack_from(dbuf, OFF_RPY)
       out_ch["rpy_raw"][i, :] = _S_FFF.unpack_from(dbuf, OFF_RPY_RAW)
       out_ch["rpy_d"][i, :] = _S_FFF.unpack_from(dbuf, OFF_RPY_D)
+      out_ch["omega_raw"][i, :] = _S_FFF.unpack_from(dbuf, OFF_OMEGA_RAW)
       out_ch["omega_d"][i, :] = _S_FFF.unpack_from(dbuf, OFF_OMEGA_D)
       out_ch["omega"][i, :]   = _S_FFF.unpack_from(dbuf, OFF_OMEGA)
+      out_ch["alpha_raw"][i, :] = _S_FFF.unpack_from(dbuf, OFF_ALPHA_RAW)
       out_ch["alpha_d"][i, :] = _S_FFF.unpack_from(dbuf, OFF_ALPHA_D)
       out_ch["alpha"][i, :]   = _S_FFF.unpack_from(dbuf, OFF_ALPHA)
 
@@ -618,8 +578,10 @@ class MMapReader:
       "rpy": np.empty((n, 3), dtype=np.float32),
       "rpy_raw": np.empty((n, 3), dtype=np.float32),
       "rpy_d": np.empty((n, 3), dtype=np.float32),
+      "omega_raw": np.empty((n, 3), dtype=np.float32),
       "omega_d": np.empty((n, 3), dtype=np.float32),
       "omega": np.empty((n, 3), dtype=np.float32),
+      "alpha_raw": np.empty((n, 3), dtype=np.float32),
       "alpha_d": np.empty((n, 3), dtype=np.float32),
       "alpha": np.empty((n, 3), dtype=np.float32),
       "tau_d": np.empty((n, 3), dtype=np.float32),
@@ -856,27 +818,29 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._phase_bars_t3: Dict[int, pg.BarGraphItem] = {}
 
     # Compact display order (keeps y-range small)
-    self._phase_order = [0, 1, 2, 3, 4, 5, 6, 99]
+    self._phase_order = [0, 1, 2, 3, 4, 5, 6, 7, 99]
     # code -> (name, description)
     self._phase_info = {
-      0: ("READY",          "program started"),
-      1: ("ARMED",          "all sanity checked"),
-      2: ("IDLE",           "propellers idling"),
-      3: ("RISING",         "thrust increasing"),
-      4: ("GAC_FLIGHT",     "only geometry control"),
-      5: ("MRG_FLIGHT",     "no CoT moving"),
-      6: ("MRG_ACTIVE_COT", "yes CoT moving"),
-      99: ("KILLED",        "killed"),
+      0: ("READY",      "program started"),
+      1: ("ARMED",      "all sanity checked"),
+      2: ("IDLE",       "all propellers are idling"),
+      3: ("RISING",     "propeller thrust increasing"),
+      4: ("GAC_ONLY",   "flight with only geometry controller"),
+      5: ("USE_DTHETA", "flight with delta-theta filtering"),
+      6: ("USE_ARM",    "flight with arm-moving"),
+      7: ("USE_FULL",   "flight with arm-moving and delta-theta filtering"),
+      99: ("KILLED",    "killed"),
     }
     # code -> RGBA (distinct colors)
     self._phase_colors = {
-      0: (120, 120, 120, 220),   # gray
-      1: (0, 120, 255, 220),     # blue
-      2: (0, 200, 0, 220),       # green
-      3: (255, 230, 0, 220),     # yellow
-      4: (255, 165, 0, 220),     # orange
-      5: (255, 0, 0, 220),       # red
-      6: (160, 0, 255, 220),     # purple
+      0:  (120, 120, 120, 220),  # gray
+      1:  (0, 120, 255, 220),    # blue
+      2:  (0, 200, 0, 220),      # green
+      3:  (255, 230, 0, 220),    # yellow
+      4:  (255, 165, 0, 220),    # orange
+      5:  (255, 0, 0, 220),      # red
+      6:  (160, 0, 255, 220),    # purple
+      7:  (0, 200, 200, 220),    # cyan
       99: (0, 0, 0, 220),        # black
     }
     # LUT: uint8 phase -> compact idx (or -1)
@@ -886,6 +850,13 @@ class LoggerWindow(QtWidgets.QMainWindow):
     # Viewer performance knobs (does NOT affect recording)
     self.view_max_points = 6000  # set 0 to disable decimation
     self._last_wc_plotted: int = -1
+
+    # Display-only smoothing.
+    # 0 means raw. This must not affect mmap reading or saved logs.
+    self._smooth_level: int = 0
+    self._smooth_max_sec: float = 0.20
+    self._smooth_slider: Optional[QtWidgets.QSlider] = None
+    self._smooth_lbl: Optional[QtWidgets.QLabel] = None
 
     # recorder (live only)
     if log_dir is None:
@@ -1128,8 +1099,25 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self.lbl_path = QtWidgets.QLabel("path: " + (self.replay_path if self.replay_path else self.reader.path))
     self.lbl_stat = QtWidgets.QLabel("waiting...")
     self.lbl_stat.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+    self._smooth_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+    self._smooth_slider.setRange(0, 100)
+    self._smooth_slider.setValue(0)
+    self._smooth_slider.setFixedWidth(160)
+    self._smooth_slider.setToolTip("Display-only smoothing for tau and F1~F4 plots")
+    self._smooth_slider.valueChanged.connect(self._on_smooth_changed)
+
+    self._smooth_lbl = QtWidgets.QLabel("raw")
+    self._smooth_lbl.setMinimumWidth(55)
+    self._smooth_lbl.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+
     top.addWidget(self.lbl_path, 1)
+    top.addSpacing(8)
+    top.addWidget(QtWidgets.QLabel("smooth:"), 0)
+    top.addWidget(self._smooth_slider, 0)
+    top.addWidget(self._smooth_lbl, 0)
+    top.addSpacing(8)
     top.addWidget(self.lbl_stat, 1)
+
     layout.addLayout(top)
 
     # -------------------------
@@ -1279,9 +1267,9 @@ class LoggerWindow(QtWidgets.QMainWindow):
     self._curves["yaw_act"]   = p2c3.plot(pen=pen_act, name="act")
 
     # ========== 1-Row 3: tau ==========
-    p3c1 = _mk_plot(self.glw1, 2, 0, "tau_x [N·m]", y_range=(-6., 6.))
-    p3c2 = _mk_plot(self.glw1, 2, 1, "tau_y [N·m]", y_range=(-2., 2.))
-    p3c3 = _mk_plot(self.glw1, 2, 2, "tau_z [N·m]", y_range=(-2., 2.))
+    p3c1 = _mk_plot(self.glw1, 2, 0, "tau_x [N·m]", y_range=(-1.5, 1.5))
+    p3c2 = _mk_plot(self.glw1, 2, 1, "tau_y [N·m]", y_range=(-6., 11.))
+    p3c3 = _mk_plot(self.glw1, 2, 2, "tau_z [N·m]", y_range=(-1., 1.))
 
     self._curves["tau_x_off"]    = p3c1.plot(pen=pen_cot,   name="off-d")
     self._curves["tau_x_thrust"] = p3c1.plot(pen=pen_thr,   name="thrust")
@@ -1300,7 +1288,7 @@ class LoggerWindow(QtWidgets.QMainWindow):
 
     # ========== 1-Row 4: f1234 / tilt / f_total ==========
     p4c1 = _mk_plot(self.glw1, 3, 0,  "r_cot [mm]", y_range=(-120., 120.))
-    p4c2 = _mk_plot(self.glw1, 3, 1, "f_thrst [N]", y_range=(15. , 40.))
+    p4c2 = _mk_plot(self.glw1, 3, 1, "f_thrst [N]", y_range=(10. , 30.))
     p4c3 = _mk_plot(self.glw1, 3, 2, "f_total [N]", y_range=(40., 100.))
 
     self._curves["rcot_x_cmd"] = p4c1.plot(pen=pen_rcot_x_cmd, name="cmd x")
@@ -1446,11 +1434,14 @@ class LoggerWindow(QtWidgets.QMainWindow):
     p3r2c2 = _mk_plot(self.glw3, 1, 1, "omega_y [deg/s]", y_range=(-150.0, 150.0))
     p3r2c3 = _mk_plot(self.glw3, 1, 2, "omega_z [deg/s]", y_range=( -10.0,  10.0))
 
-    self._curves["t3_omega_x_des"] = p3r2c1.plot(pen=pen_des, name="des")
+    self._curves["t3_omega_x_raw"] = p3r2c1.plot(pen=pen_raw, name="raw")
+    self._curves["t3_omega_x_mrg"] = p3r2c1.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_omega_x_act"] = p3r2c1.plot(pen=pen_act, name="act")
-    self._curves["t3_omega_y_des"] = p3r2c2.plot(pen=pen_des, name="des")
+    self._curves["t3_omega_y_raw"] = p3r2c2.plot(pen=pen_raw, name="raw")
+    self._curves["t3_omega_y_mrg"] = p3r2c2.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_omega_y_act"] = p3r2c2.plot(pen=pen_act, name="act")
-    self._curves["t3_omega_z_des"] = p3r2c3.plot(pen=pen_des, name="des")
+    self._curves["t3_omega_z_raw"] = p3r2c3.plot(pen=pen_raw, name="raw")
+    self._curves["t3_omega_z_mrg"] = p3r2c3.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_omega_z_act"] = p3r2c3.plot(pen=pen_act, name="act")
 
     # ========== 3-Row 3 ==========
@@ -1458,11 +1449,14 @@ class LoggerWindow(QtWidgets.QMainWindow):
     p3r3c2 = _mk_plot(self.glw3, 2, 1, "alpha_y [deg/s^2]", y_range=(-700.0, 700.0))
     p3r3c3 = _mk_plot(self.glw3, 2, 2, "alpha_z [deg/s^2]", y_range=( -20.0,  20.0))
 
-    self._curves["t3_alpha_x_des"] = p3r3c1.plot(pen=pen_des, name="des")
+    self._curves["t3_alpha_x_raw"] = p3r3c1.plot(pen=pen_raw, name="raw")
+    self._curves["t3_alpha_x_mrg"] = p3r3c1.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_alpha_x_act"] = p3r3c1.plot(pen=pen_act, name="act")
-    self._curves["t3_alpha_y_des"] = p3r3c2.plot(pen=pen_des, name="des")
+    self._curves["t3_alpha_y_raw"] = p3r3c2.plot(pen=pen_raw, name="raw")
+    self._curves["t3_alpha_y_mrg"] = p3r3c2.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_alpha_y_act"] = p3r3c2.plot(pen=pen_act, name="act")
-    self._curves["t3_alpha_z_des"] = p3r3c3.plot(pen=pen_des, name="des")
+    self._curves["t3_alpha_z_raw"] = p3r3c3.plot(pen=pen_raw, name="raw")
+    self._curves["t3_alpha_z_mrg"] = p3r3c3.plot(pen=pen_mrg, name="mrg")
     self._curves["t3_alpha_z_act"] = p3r3c3.plot(pen=pen_act, name="act")
 
     # ========== 3-Row 4 ==========
@@ -1643,6 +1637,108 @@ class LoggerWindow(QtWidgets.QMainWindow):
       _add_rotor_curves(pr3, "r3")
       _add_rotor_curves(pr4, "r4")
 
+  def _smooth_sec(self) -> float:
+    """
+    Map slider value to smoothing sigma in seconds.
+    Nonlinear mapping gives fine control near raw.
+    """
+    level = max(0, min(100, int(getattr(self, "_smooth_level", 0))))
+    if level <= 0:
+      return 0.0
+    a = float(level) / 100.0
+    return (a * a) * float(getattr(self, "_smooth_max_sec", 0.20))
+
+  @QtCore.pyqtSlot(int)
+  def _on_smooth_changed(self, value: int) -> None:
+    self._smooth_level = max(0, min(100, int(value)))
+
+    smooth_sec = self._smooth_sec()
+    if self._smooth_lbl is not None:
+      if smooth_sec <= 0.0:
+        self._smooth_lbl.setText("raw")
+      else:
+        self._smooth_lbl.setText(f"{smooth_sec * 1000.0:.0f} ms")
+
+    # Live mode updates on the next timer tick. Replay mode has no timer,
+    # so redraw the current visible replay window immediately.
+    if self.replay_path is not None and self._x_master is not None:
+      try:
+        xr = self._x_master.viewRange()[0]
+        self._apply_replay_window(float(xr[0]), float(xr[1]), source="smooth")
+      except Exception:
+        pass
+
+  def _smooth_1d_for_display(self, y: np.ndarray, sigma_samples: float) -> np.ndarray:
+    """
+    NaN-aware zero-phase Gaussian smoothing for display only.
+    The input array is never modified.
+    """
+    if sigma_samples <= 0.25:
+      return y
+
+    y0 = np.asarray(y, dtype=np.float32)
+    n = int(y0.size)
+    if n < 3:
+      return y
+
+    radius = int(math.ceil(3.0 * float(sigma_samples)))
+    radius = max(1, min(radius, max(1, n - 1)))
+
+    xx = np.arange(-radius, radius + 1, dtype=np.float32)
+    k = np.exp(-0.5 * (xx / np.float32(sigma_samples)) ** 2).astype(np.float32)
+    k /= np.sum(k, dtype=np.float32)
+
+    finite = np.isfinite(y0)
+    if np.all(finite):
+      yp = np.pad(y0, (radius, radius), mode="edge")
+      return np.convolve(yp, k, mode="valid").astype(np.float32, copy=False)
+
+    # Weighted convolution so NaNs do not contaminate nearby valid samples.
+    v = np.where(finite, y0, np.float32(0.0)).astype(np.float32, copy=False)
+    w = finite.astype(np.float32, copy=False)
+    vp = np.pad(v, (radius, radius), mode="edge")
+    wp = np.pad(w, (radius, radius), mode="edge")
+
+    num = np.convolve(vp, k, mode="valid")
+    den = np.convolve(wp, k, mode="valid")
+    out = np.full_like(y0, np.nan, dtype=np.float32)
+    ok = den > np.float32(1e-6)
+    out[ok] = (num[ok] / den[ok]).astype(np.float32, copy=False)
+    return out
+
+  def _smooth_for_display(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """
+    Smooth only rendered arrays. This is intentionally applied after
+    decimation to keep UI cost bounded.
+    """
+    smooth_sec = self._smooth_sec()
+    if smooth_sec <= 0.0:
+      return y
+
+    x0 = np.asarray(x, dtype=np.float32)
+    if x0.size < 3:
+      return y
+
+    dx = np.diff(x0)
+    dx = dx[np.isfinite(dx) & (dx > np.float32(0.0))]
+    if dx.size == 0:
+      return y
+
+    dt = float(np.median(dx))
+    if not np.isfinite(dt) or dt <= 0.0:
+      return y
+
+    sigma_samples = smooth_sec / dt
+    y0 = np.asarray(y, dtype=np.float32)
+
+    if y0.ndim == 1:
+      return self._smooth_1d_for_display(y0, sigma_samples)
+
+    out = np.empty_like(y0, dtype=np.float32)
+    for j in range(y0.shape[1]):
+      out[:, j] = self._smooth_1d_for_display(y0[:, j], sigma_samples)
+    return out
+
   def _update_plots(self, t: np.ndarray, ch: Dict[str, np.ndarray], wc: int) -> None:
     if t.size == 0:
       self.lbl_stat.setText("no data")
@@ -1684,9 +1780,11 @@ class LoggerWindow(QtWidgets.QMainWindow):
       rpy_raw_deg = ch["rpy_raw"][sl, :] * _RAD2DEG
       rpy_d_deg   = ch["rpy_d"][sl, :] * _RAD2DEG
       omega_act = ch["omega"][sl, :] * _RAD2DEG
-      omega_des = ch["omega_d"][sl, :] * _RAD2DEG
+      omega_raw = ch["omega_d"][sl, :] * _RAD2DEG
+      omega_mrg = ch["omega_raw"][sl, :] * _RAD2DEG
       alpha_act = ch["alpha"][sl, :] * _RAD2DEG
-      alpha_des = ch["alpha_d"][sl, :] * _RAD2DEG
+      alpha_raw = ch["alpha_d"][sl, :] * _RAD2DEG
+      alpha_mrg = ch["alpha_raw"][sl, :] * _RAD2DEG
 
       tau_d      = ch["tau_d"][sl, :]
       tau_z_t    = ch["tau_z_t"][sl]
@@ -1697,6 +1795,17 @@ class LoggerWindow(QtWidgets.QMainWindow):
       f_thrst_con = ch["f_thrst_con"][sl, :]
       tilt_deg    = ch["tilt"][sl, :] * _RAD2DEG
       f_des       = ch["f_des"][sl]
+
+      # Display-only smoothing is applied only to the tau plots and F1~F4 plots.
+      # Do not smooth position, attitude, phase, status, arm, or saved data.
+      tau_d_plot      = self._smooth_for_display(x, tau_d)
+      tau_z_t_plot    = self._smooth_for_display(x, tau_z_t)
+      tau_off_plot    = self._smooth_for_display(x, tau_off)
+      tau_thrust_plot = self._smooth_for_display(x, tau_thrust)
+
+      f_thrst_plot     = self._smooth_for_display(x, f_thrst)
+      f_thrst_con_plot = self._smooth_for_display(x, f_thrst_con)
+      f_tot_plot       = f_thrst_con_plot.sum(axis=1, dtype=np.float32)
 
       r_cot_d_mm   = ch["r_cot_d"][sl, :] * _M2MM
       r_cot_act_mm = ch["r_cot"][sl, :] * _M2MM
@@ -1752,44 +1861,29 @@ class LoggerWindow(QtWidgets.QMainWindow):
       self._curves["yaw_act"].setData(x,   rpy_act_deg[:, 2])
 
       # --- Row 3: tau ---
-      self._curves["tau_x_des"].setData(x, tau_d[:, 0])
-      self._curves["tau_x_off"].setData(x, tau_off[:, 0])
-      self._curves["tau_x_thrust"].setData(x, tau_thrust[:, 0])
-      self._curves["tau_x_total"].setData(x, tau_off[:, 0] + tau_thrust[:, 0])
+      self._curves["tau_x_des"].setData(x, tau_d_plot[:, 0])
+      self._curves["tau_x_off"].setData(x, tau_off_plot[:, 0])
+      self._curves["tau_x_thrust"].setData(x, tau_thrust_plot[:, 0])
+      self._curves["tau_x_total"].setData(x, tau_off_plot[:, 0] + tau_thrust_plot[:, 0])
 
-      self._curves["tau_y_des"].setData(x, tau_d[:, 1])
-      self._curves["tau_y_off"].setData(x, tau_off[:, 1])
-      self._curves["tau_y_thrust"].setData(x, tau_thrust[:, 1])
-      self._curves["tau_y_total"].setData(x, tau_off[:, 1] + tau_thrust[:, 1])
+      self._curves["tau_y_des"].setData(x, tau_d_plot[:, 1])
+      self._curves["tau_y_off"].setData(x, tau_off_plot[:, 1])
+      self._curves["tau_y_thrust"].setData(x, tau_thrust_plot[:, 1])
+      self._curves["tau_y_total"].setData(x, tau_off_plot[:, 1] + tau_thrust_plot[:, 1])
 
-      self._curves["tau_z_des"].setData(x, tau_d[:, 2])
-      self._curves["tau_z_total"].setData(x, tau_z_t + tau_thrust[:, 2])
-      self._curves["tau_z_thrust"].setData(x, tau_z_t)
-      self._curves["tau_z_reaction"].setData(x, tau_thrust[:, 2])
+      self._curves["tau_z_des"].setData(x, tau_d_plot[:, 2])
+      self._curves["tau_z_total"].setData(x, tau_z_t_plot + tau_thrust_plot[:, 2])
+      self._curves["tau_z_thrust"].setData(x, tau_z_t_plot)
+      self._curves["tau_z_reaction"].setData(x, tau_thrust_plot[:, 2])
 
       # --- Row 4: thrust / tilt / total thrust ---
-      f_thrst_lp = np.empty_like(f_thrst, dtype=np.float32)
-      f_thrst_con_lp = np.empty_like(f_thrst_con, dtype=np.float32)
       for i in range(4):
-        f_thrst_lp[:, i] = lpf_1pole(f_thrst[:, i], x, FC_THRUST_HZ).astype(np.float32)
-        f_thrst_con_lp[:, i] = lpf_1pole(f_thrst_con[:, i], x, FC_THRUST_HZ).astype(np.float32)
-
-      tilt_deg_lp = np.empty_like(tilt_deg, dtype=np.float32)
-      for i in range(4):
-        tilt_deg_lp[:, i] = lpf_1pole(tilt_deg[:, i], x, FC_THRUST_HZ).astype(np.float32)
-
-      for i in range(4):
-        self._curves[f"F{i+1}"].setData(x, f_thrst_lp[:, i])
-        self._curves[f"F{i+1}_con"].setData(x, f_thrst_con_lp[:, i])
+        self._curves[f"F{i+1}"].setData(x, f_thrst_plot[:, i])
+        self._curves[f"F{i+1}_con"].setData(x, f_thrst_con_plot[:, i])
         k = f"tilt{i+1}"
-        if k in self._curves:
-          self._curves[k].setData(x, tilt_deg_lp[:, i])
-
-      f_tot = f_thrst_con_lp.sum(axis=1)
-      f_des_lp = lpf_1pole(f_des, x, FC_THRUST_HZ).astype(np.float32)
-
-      self._curves["f_des"].setData(x, f_des_lp)
-      self._curves["f_tot"].setData(x, f_tot, dtype=np.float32)
+        if k in self._curves: self._curves[k].setData(x, tilt_deg[:, i])
+      self._curves["f_des"].setData(x, f_des)
+      self._curves["f_tot"].setData(x, f_tot_plot)
 
       # --- Row 5: r_cot / solve_ms / solve_status ---
       self._curves["rcot_x_cmd"].setData(x, r_cot_d_mm[:, 0])
@@ -1966,19 +2060,25 @@ class LoggerWindow(QtWidgets.QMainWindow):
       self._curves["t3_yaw_mrg"].setData(x,   rpy_d_deg[:, 2])
       self._curves["t3_yaw_act"].setData(x,   rpy_act_deg[:, 2])
 
+      self._curves["t3_omega_x_raw"].setData(x, omega_raw[:, 0])
+      self._curves["t3_omega_x_mrg"].setData(x, omega_mrg[:, 0])
       self._curves["t3_omega_x_act"].setData(x, omega_act[:, 0])
-      self._curves["t3_omega_x_des"].setData(x, omega_des[:, 0])
+      self._curves["t3_omega_y_raw"].setData(x, omega_raw[:, 1])
+      self._curves["t3_omega_y_mrg"].setData(x, omega_mrg[:, 1])
       self._curves["t3_omega_y_act"].setData(x, omega_act[:, 1])
-      self._curves["t3_omega_y_des"].setData(x, omega_des[:, 1])
+      self._curves["t3_omega_z_raw"].setData(x, omega_raw[:, 2])
+      self._curves["t3_omega_z_mrg"].setData(x, omega_mrg[:, 2])
       self._curves["t3_omega_z_act"].setData(x, omega_act[:, 2])
-      self._curves["t3_omega_z_des"].setData(x, omega_des[:, 2])
 
+      self._curves["t3_alpha_x_raw"].setData(x, alpha_raw[:, 0])
+      self._curves["t3_alpha_x_mrg"].setData(x, alpha_mrg[:, 0])
       self._curves["t3_alpha_x_act"].setData(x, alpha_act[:, 0])
-      self._curves["t3_alpha_x_des"].setData(x, alpha_des[:, 0])
+      self._curves["t3_alpha_y_raw"].setData(x, alpha_raw[:, 1])
+      self._curves["t3_alpha_y_mrg"].setData(x, alpha_mrg[:, 1])
       self._curves["t3_alpha_y_act"].setData(x, alpha_act[:, 1])
-      self._curves["t3_alpha_y_des"].setData(x, alpha_des[:, 1])
+      self._curves["t3_alpha_z_raw"].setData(x, alpha_raw[:, 2])
+      self._curves["t3_alpha_z_mrg"].setData(x, alpha_mrg[:, 2])
       self._curves["t3_alpha_z_act"].setData(x, alpha_act[:, 2])
-      self._curves["t3_alpha_z_des"].setData(x, alpha_des[:, 2])
 
       self._curves["t3_tau_x_des"].setData(x, tau_d[:, 0])
       self._curves["t3_tau_x_off"].setData(x, tau_off[:, 0])
@@ -2115,8 +2215,10 @@ class LoggerWindow(QtWidgets.QMainWindow):
           "rpy": data["rpy"].astype(np.float32),
           "rpy_raw": data["rpy_raw"].astype(np.float32),
           "rpy_d": data["rpy_d"].astype(np.float32),
+          "omega_raw": data["omega_raw"].astype(np.float32),
           "omega_d": data["omega_d"].astype(np.float32),
           "omega": data["omega"].astype(np.float32),
+          "alpha_raw": data["alpha_raw"].astype(np.float32),
           "alpha_d": data["alpha_d"].astype(np.float32),
           "alpha": data["alpha"].astype(np.float32),
           "tau_d": data["tau_d"].astype(np.float32),

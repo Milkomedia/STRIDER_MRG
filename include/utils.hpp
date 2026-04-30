@@ -22,14 +22,17 @@ enum class Phase : uint8_t {
 struct State {
   Eigen::Vector3d pos = Eigen::Vector3d::Zero();       // current linear position [m] (Optitrack)
   Eigen::Vector3d vel = Eigen::Vector3d::Zero();       // current linear velocity [m/s] (Optitrack)
-  Eigen::Vector3d acc = Eigen::Vector3d::Zero();       // current linear acceleration [m/s^2] (Optitrack)
+  Eigen::Vector3d acc = Eigen::Vector3d::Zero();       // current linear acceleration [m/s^2] (Optitrack, just logging - not used)
   Eigen::Matrix3d R   = Eigen::Matrix3d::Identity();   // current Rotation matrix [SO3] (T265)
+  Eigen::Vector3d att = Eigen::Vector3d::Identity();   // current euler angle [rad] (T265)
   Eigen::Vector3d omega = Eigen::Vector3d::Zero();     // current angular velocity [rad/s] (T265)
   Eigen::Vector3d alpha = Eigen::Vector3d::Zero();     // current angular acceleration [rad/s^2] (T265, just logging - not used)
-  Eigen::Vector3d r1  = Eigen::Vector3d::Zero();       // current rotor1 position [m] (Dynamixel)
-  Eigen::Vector3d r2  = Eigen::Vector3d::Zero();       // current rotor2 position [m] (Dynamixel)
-  Eigen::Vector3d r3  = Eigen::Vector3d::Zero();       // current rotor3 position [m] (Dynamixel)
-  Eigen::Vector3d r4  = Eigen::Vector3d::Zero();       // current rotor4 position [m] (Dynamixel)
+  Eigen::Vector3d d_hat = Eigen::Vector3d::Zero();     // estimated torque disturbance [N.m]
+  std::array<Eigen::Vector3d, 4> r = {
+                          Eigen::Vector3d::Zero(),
+                          Eigen::Vector3d::Zero(),
+                          Eigen::Vector3d::Zero(),
+                          Eigen::Vector3d::Zero()};    // current rotor position [m] (Dynamixel)
   Eigen::Vector3d r_cot = Eigen::Vector3d::Zero();     // current b_p_CoT position [m] (Dynamixel)
   double arm_q[20] = {0.0};                            // current joint angle [rad] (Dynamixel)
   Eigen::Vector3d r_com = Eigen::Vector3d::Zero();     // current estimated CoM position [m]
@@ -46,10 +49,7 @@ struct Command {
   double tauz_bar  = 0.0;                               // current yaw thrust torque [N.m] (Sequential control allocation)
   // These can only be changed by MPC
   Eigen::Vector3d d_theta = Eigen::Vector3d::Zero();    // desired delta theta [rad]
-  Eigen::Vector3d r1 = param::r1_init;                  // desired rotor1 position [m], z-element is not updated
-  Eigen::Vector3d r2 = param::r2_init;                  // desired rotor2 position [m], z-element is not updated
-  Eigen::Vector3d r3 = param::r3_init;                  // desired rotor3 position [m], z-element is not updated
-  Eigen::Vector3d r4 = param::r4_init;                  // desired rotor4 position [m], z-element is not updated
+  std::array<Eigen::Vector3d, 4> r = param::INIT_R;     // desired rotor position [m], z-element is not updated
   // NOTE: r1234 can be manually changed by SBUS during [GAC_FLIGHT] phase.
 };
 
@@ -241,6 +241,69 @@ static inline Eigen::Vector3d smooth(const Eigen::Vector3d& x, const Eigen::Vect
   return x + alpha * (x_d - x);
 }
 
+// --------- [ Torque DOB ] ---------
+static inline Eigen::Vector3d dob_update(const Eigen::Vector3d& rpy, const Eigen::Vector3d& tau_cmd, Eigen::Matrix<double, 3, 6>& state) {
+  constexpr int X1 = 0;
+  constexpr int X2 = 1;
+  constexpr int X3 = 2;
+  constexpr int Y1 = 3;
+  constexpr int Y2 = 4;
+  constexpr int Y3 = 5;
+
+  constexpr double wc = 2.0 * M_PI * param::DOB_CUTOFF_HZ;
+  constexpr double wc2 = wc * wc;
+  constexpr double wc3 = wc2 * wc;
+  constexpr double a1 = -2.0 * wc;
+  constexpr double a2 = -2.0 * wc2;
+  constexpr double a3 = -wc3;
+  constexpr int J_IDX[3] = {0, 4, 8};
+
+  Eigen::Vector3d d_hat = Eigen::Vector3d::Zero();
+
+  for (int i = 0; i < 3; ++i) {
+    double& x1 = state(i, X1);
+    double& x2 = state(i, X2);
+    double& x3 = state(i, X3);
+    double& y1 = state(i, Y1);
+    double& y2 = state(i, Y2);
+    double& y3 = state(i, Y3);
+
+    const double x1_prev = x1;
+    const double x2_prev = x2;
+    const double x3_prev = x3;
+    const double y1_prev = y1;
+    const double y2_prev = y2;
+    const double y3_prev = y3;
+
+    // Angle-driven filter
+    const double dx1 = a1 * x1_prev + a2 * x2_prev + a3 * x3_prev + rpy(i);
+    const double dx2 = x1_prev;
+    const double dx3 = x2_prev;
+
+    // Torque-driven filter
+    const double dy1 = a1 * y1_prev + a2 * y2_prev + a3 * y3_prev + tau_cmd(i);
+    const double dy2 = y1_prev;
+    const double dy3 = y2_prev;
+
+    x1 = x1_prev + param::TARGET_CTRL_DT * dx1;
+    x2 = x2_prev + param::TARGET_CTRL_DT * dx2;
+    x3 = x3_prev + param::TARGET_CTRL_DT * dx3;
+
+    y1 = y1_prev + param::TARGET_CTRL_DT * dy1;
+    y2 = y2_prev + param::TARGET_CTRL_DT * dy2;
+    y3 = y3_prev + param::TARGET_CTRL_DT * dy3;
+
+    const double tau_hat = param::J[J_IDX[i]] * wc3 * x1;
+    const double q_tau   = wc3 * y3;
+    const double d_i     = tau_hat - q_tau;
+
+    d_hat(i) = std::clamp(d_i, -param::DOB_TORQUE_SAT, param::DOB_TORQUE_SAT);
+  }
+  d_hat(2) = 0.0;
+
+  return d_hat;
+}
+
 // --------- [ Kinematics ] ---------
 static inline void onearm_IK(const Eigen::Vector3d& pos, const Eigen::Vector3d& heading, double out5[5]) {
   Eigen::Vector3d heading_in = heading;
@@ -302,8 +365,7 @@ static inline void onearm_IK(const Eigen::Vector3d& pos, const Eigen::Vector3d& 
   out5[4] = th5;
 }
 
-static inline void IK(const Eigen::Vector3d& bPa1, const Eigen::Vector3d& bPa2, const Eigen::Vector3d& bPa3, const Eigen::Vector3d& bPa4, const Eigen::Vector4d& th_tvc, double q[20]) {
-  const std::array<Eigen::Vector3d, 4> bodyParm{bPa1, bPa2, bPa3, bPa4};
+static inline void IK(const std::array<Eigen::Vector3d, 4>& bodyParm, const Eigen::Vector4d& th_tvc, double q[20]) {
   std::array<Eigen::Vector3d, 4> bodyE3arm;
   const double s1 = std::sin(th_tvc(0)); const double c1 = std::cos(th_tvc(0));
   const double s2 = std::sin(th_tvc(1)); const double c2 = std::cos(th_tvc(1));
@@ -344,61 +406,29 @@ static inline Eigen::Matrix4d compute_DH(double a, double alpha, double d, doubl
   const double s_a = sin(alpha);
   
   T << c_th, -s_th * c_a,  s_th * s_a, a * c_th,
-      s_th,   c_th * c_a, -c_th * s_a, a * s_th,
-      0.0,         s_a,        c_a,        d,
-      0.0,         0.0,        0.0,       1.0;
+       s_th,  c_th * c_a, -c_th * s_a, a * s_th,
+       0.0,          s_a,         c_a,        d,
+       0.0,          0.0,         0.0,      1.0;
   return T;
 }
 
-static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3d& r1, Eigen::Vector3d& r2, Eigen::Vector3d& r3, Eigen::Vector3d& r4) {
-  std::array<Eigen::Vector3d*, 4> bparm = {&r1, &r2, &r3, &r4};
+static inline void FK(const double q[20], Eigen::Vector3d& bpcot, Eigen::Vector3d& bpcom, std::array<Eigen::Vector3d, 4>& r) {
+  Eigen::Vector3d mass_weighted_sum = Eigen::Vector3d::Zero();
+  bpcom = Eigen::Vector3d::Zero();
   bpcot = Eigen::Vector3d::Zero();
 
   for (uint8_t i = 0; i < 4; ++i) {
     Eigen::Matrix4d T_i = Eigen::Matrix4d::Identity();
     T_i *= compute_DH(param::B2BASE_A[i], param::B2BASE_ALPHA[i], 0.0, param::B2BASE_THETA[i]);
-    for (int j = 0; j < 5; ++j) {T_i *= compute_DH(param::DH_ARM_A[j], param::DH_ARM_ALPHA[j], 0.0, q[5*i+j]);}
-    *(bparm[i]) = T_i.block<3,1>(0,3);
-    bpcot += *(bparm[i]);
+    for (int j = 0; j < 5; ++j) {
+      T_i *= compute_DH(param::DH_ARM_A[j], param::DH_ARM_ALPHA[j], 0.0, q[5*i+j]);
+      mass_weighted_sum += param::M_LINK[j] * (T_i.block<3,1>(0,3) + param::LINK_COM_DIST[j] * T_i.block<3,1>(0,0));
+    }
+    r[i] = T_i.block<3,1>(0,3);
+    bpcot += r[i];
   }
   bpcot *= 0.25;
-}
-
-static inline Eigen::Vector2d com_estimator(const double arm_q[20], const Eigen::Vector3d bpcot) {
-  Eigen::Vector2d moment = Eigen::Vector2d::Zero();
-  Eigen::Vector2d r_com = Eigen::Vector2d::Zero();
-
-  double M_link = 0.0;
-  for (int i = 0; i < 5; i++) M_link += param::M_link[i];
-
-  const double M_total = param::M_bodys + 4.0 * M_link;
-
-  for (int arm = 0; arm < 4; ++arm) {
-    int k = 5 * arm;
-
-    const double q1 = arm_q[k];
-    const double q2 = arm_q[k+1];
-    const double q3 = arm_q[k+2];
-    const double phi = param::B2BASE_THETA[arm] - q1;
-
-    const double c2  = std::cos(q2);
-    const double c23 = std::cos(q2 + q3);
-
-    const double x1   = param::D_LINK[0];
-    const double x2   = param::DH_ARM_A[0] + param::D_LINK[1] * c2;
-    const double x3   = param::DH_ARM_A[0] + param::DH_ARM_A[1] * c2 + param::D_LINK[2] * c23;
-    const double xTip = param::DH_ARM_A[0] + param::DH_ARM_A[1] * c2 + param::DH_ARM_A[2] * c23;
-
-    const double moment_rho = param::M_link[0] * x1 + param::M_link[1] * x2 + param::M_link[2] * x3 + (param::M_link[3] + param::M_link[4]) * xTip;
-
-    moment(0) += M_link * param::B2BASE_A[arm] * std::cos(param::B2BASE_THETA[arm]) + moment_rho * std::cos(phi);
-    moment(1) += M_link * param::B2BASE_A[arm] * std::sin(param::B2BASE_THETA[arm]) + moment_rho * std::sin(phi);
-  }
-
-  moment(0) += param::M_bar*param::PAYLOAD_COM_OFF_X;
-  moment(1) += param::M_bar*param::PAYLOAD_COM_OFF_Y;
-  r_com = moment / M_total;
-  return r_com;
+  bpcom = mass_weighted_sum / param::M_IDEAL;
 }
 
 static inline double spin_360(double a, double amin, double amax) {
@@ -422,70 +452,69 @@ static inline double spin_360(double a, double amin, double amax) {
   return best;
 }
 
-static inline void cart2polar(const Eigen::Vector3d& r1, const Eigen::Vector3d& r2, const Eigen::Vector3d& r3, const Eigen::Vector3d& r4, Eigen::Vector2d& p1, Eigen::Vector2d& p2, Eigen::Vector2d& p3, Eigen::Vector2d& p4) {
+static inline void cart2polar(const std::array<Eigen::Vector3d, 4>& cart, std::array<Eigen::Vector3d, 4>& polar) {
   constexpr double eps = 1e-12;
 
-  const Eigen::Vector3d* cart[4] = {&r1, &r2, &r3, &r4};
-  Eigen::Vector2d* polar[4] = {&p1, &p2, &p3, &p4};
+  for (uint8_t i = 0; i < 4; ++i) {
+    const double dx = cart[i](0) - param::B2BASE_X[i];
+    const double dy = cart[i](1) - param::B2BASE_Y[i];
 
-  for (int a = 0; a < 4; ++a) {
-    const double dx = (*cart[a])(0) - param::B2BASE_X[a];
-    const double dy = (*cart[a])(1) - param::B2BASE_Y[a];
-
-    const double rho = std::sqrt(dx * dx + dy * dy);
-    double alpha = (rho > eps) ? std::atan2(dy, dx) : 0.0;
-
-    // Make alpha compatible with your box bounds which may exceed [-pi, pi].
-    alpha = spin_360(alpha, param::ALPHA_MIN[a], param::ALPHA_MAX[a]);
-
-    (*polar[a])(0) = rho;
-    (*polar[a])(1) = alpha;
+    polar[i](0) = std::sqrt(dx * dx + dy * dy);
+    polar[i](1) = std::atan2(dy, dx);
+    polar[i](2) = param::INIT_R[i](2);
   }
 }
 
-static inline void polar2cart(const Eigen::Vector2d& p1, const Eigen::Vector2d& p2, const Eigen::Vector2d& p3, const Eigen::Vector2d& p4, Eigen::Vector2d& r1, Eigen::Vector2d& r2, Eigen::Vector2d& r3, Eigen::Vector2d& r4) {
-  const Eigen::Vector2d* polar[4] = {&p1, &p2, &p3, &p4};
-  Eigen::Vector2d* cart[4] = {&r1, &r2, &r3, &r4};
+static inline void polar2cart(const std::array<Eigen::Vector3d, 4>& polar, std::array<Eigen::Vector3d, 4>& cart) {
+  for (uint8_t i = 0; i < 4; ++i) {
+    const double rho   = polar[i](0);
+    const double alpha = polar[i](1);
 
-  for (int a = 0; a < 4; ++a) {
-    const double rho   = (*polar[a])(0);
-    const double alpha = (*polar[a])(1);
-    (*cart[a])(0) = param::B2BASE_X[a] + rho * std::cos(alpha);
-    (*cart[a])(1) = param::B2BASE_Y[a] + rho * std::sin(alpha);
+    cart[i](0) = param::B2BASE_X[i] + rho * std::cos(alpha);
+    cart[i](1) = param::B2BASE_Y[i] + rho * std::sin(alpha);
+    cart[i](2) = param::INIT_R[i](2);
   }
 }
 
-static inline bool make_feasible(std::array<Eigen::Vector2d, 4>& r) {
-  constexpr double sq_max_stretch         = param::MAX_STRETCH * param::MAX_STRETCH;
-  constexpr double sq_min_stretch         = param::MIN_STRETCH * param::MIN_STRETCH;
-  constexpr double sq_rotor_diameter      = param::ROTOR_DIAMETER * param::ROTOR_DIAMETER;
+static inline bool ws_check(const std::array<Eigen::Vector3d, 4>& r) {
+  constexpr double sq_rotor_diameter = param::ROTOR_DIAMETER * param::ROTOR_DIAMETER;
+  constexpr double two_pi = 2.0 * M_PI;
 
-  constexpr double sign_x[4] = {+1.0, -1.0, -1.0, +1.0};
-  constexpr double sign_y[4] = {-1.0, -1.0, +1.0, +1.0};
-  constexpr int nbr_a[4] = {3, 0, 1, 2};
-  constexpr int nbr_b[4] = {1, 2, 3, 0};
+  constexpr int pair_i[4] = {0, 1, 2, 3};
+  constexpr int pair_j[4] = {1, 2, 3, 0};
 
-  for (int i = 0; i < 4; ++i) {
+  double x[4];
+  double y[4];
+
+  for (uint8_t i = 0; i < 4; ++i) {
     if (!r[i].allFinite()) return false;
 
-    double rx = r[i].x() - param::B2BASE_X[i];
-    double ry = r[i].y() - param::B2BASE_Y[i];
-
-    // Sign check
-    if (sign_x[i] > 0.0 && rx < 0.0) return false;
-    if (sign_x[i] < 0.0 && rx > 0.0) return false;
-    if (sign_y[i] > 0.0 && ry < 0.0) return false;
-    if (sign_y[i] < 0.0 && ry > 0.0) return false;
+    const double rho   = r[i].x();
+    const double alpha = r[i].y();
 
     // Stretch check
-    double n2 = rx*rx + ry*ry;
-    if (n2 < sq_min_stretch || n2 > sq_max_stretch) return false;
+    if (rho < param::MIN_STRETCH || rho > param::MAX_STRETCH){return false;}
 
-    // Collision check
-    const double sqrd_a = (r[i] - r[nbr_a[i]]).squaredNorm();
-    const double sqrd_b = (r[i] - r[nbr_b[i]]).squaredNorm();
-    if (sqrd_a < sq_rotor_diameter || sqrd_b < sq_rotor_diameter) return false;
+    // Angle bound check
+    if (alpha < param::ALPHA_MIN[i] || alpha > param::ALPHA_MAX[i]){return false;}
+
+    // Polar to Cartesian once for collision check
+    x[i] = param::B2BASE_X[i] + rho * std::cos(alpha);
+    y[i] = param::B2BASE_Y[i] + rho * std::sin(alpha);
   }
+
+  // Adjacent rotor collision check
+  for (uint8_t k = 0; k < 4; ++k) {
+    const int i = pair_i[k];
+    const int j = pair_j[k];
+
+    const double dx = x[i] - x[j];
+    const double dy = y[i] - y[j];
+    const double d2 = dx * dx + dy * dy;
+
+    if (d2 < sq_rotor_diameter){return false;}
+  }
+
   return true;
 }
 
@@ -570,16 +599,16 @@ static inline void Sequential_Allocation(const double& thrust_d, const Eigen::Ve
 
 }
 
-static inline Eigen::Vector3d Wrench_2_Torque(const Eigen::Vector4d& F1234, const Eigen::Vector3d& r1, const Eigen::Vector3d& r2, const Eigen::Vector3d& r3, const Eigen::Vector3d& r4, const Eigen::Vector3d& Pc) {
+static inline Eigen::Vector3d Wrench_2_Torque(const Eigen::Vector4d& F1234, const std::array<Eigen::Vector3d, 4>& r, const Eigen::Vector3d& Pc) {
   Eigen::Matrix<double, 3, 4> A;
-  A(0,0) = -r1(1) + Pc(1);
-  A(0,1) = -r2(1) + Pc(1);
-  A(0,2) = -r3(1) + Pc(1);
-  A(0,3) = -r4(1) + Pc(1);
-  A(1,0) =  r1(0) - Pc(0);
-  A(1,1) =  r2(0) - Pc(0);
-  A(1,2) =  r3(0) - Pc(0);
-  A(1,3) =  r4(0) - Pc(0);
+  A(0,0) = -r[0](1) + Pc(1);
+  A(0,1) = -r[1](1) + Pc(1);
+  A(0,2) = -r[2](1) + Pc(1);
+  A(0,3) = -r[3](1) + Pc(1);
+  A(1,0) =  r[0](0) - Pc(0);
+  A(1,1) =  r[1](0) - Pc(0);
+  A(1,2) =  r[2](0) - Pc(0);
+  A(1,3) =  r[3](0) - Pc(0);
   A(2,0) = -param::PWM_ZETA;
   A(2,1) =  param::PWM_ZETA;
   A(2,2) = -param::PWM_ZETA;
@@ -668,7 +697,7 @@ static inline void init_manual_to_path(const State& s, Command& cmd, bool& initi
   // cmd.r4  = smooth(cmd.r4,  param::r4_init,     0.5);
 }
 
-static inline void init_path_to_manual(const State& s, Command& cmd, const Eigen::Vector3d& bPcot, int& mode_changed) {
+static inline void init_path_to_manual(const State& s, Command& cmd, int& mode_changed) {
   if (!mode_changed) return;
 
   cmd.pos = smooth(cmd.pos, Eigen::Vector3d(0.0, 0.0, -1.3), 1.3);
@@ -751,7 +780,7 @@ static inline void path_generator_LR(const std::chrono::steady_clock::time_point
 
 // --------- [ ETC ] ---------
 static inline void clear_local_plan(strider_mpc::MPCOutput& l) {
-  l.u_opt.setZero();
+  l.x_stage.setZero();
   l.u_stage.setZero();
   l.solve_ms = 0.0;
   l.state = 255;

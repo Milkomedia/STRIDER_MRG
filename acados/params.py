@@ -1,8 +1,8 @@
 import numpy as np
 
 # MPC horizon
-N  = 200     # number of steps
-DT = 1.0 / 75.0  # [s] (of each step)
+N  = 75      # number of steps
+DT = 1.0 / 400.0  # [s] (of each step)
 
 # ---------- model parameters ----------
 J_TENSOR = np.array([
@@ -23,7 +23,6 @@ ZETA = 0.5
 # IK & CoM estimate
 M_LINK   = np.array([0.374106, 0.13658, 0.0415148, 0.102003, 0.3734]) # each link mass [kg]
 M_CENTER = 2.80958                                                    # center body 1.48958 + load mass 1.32[kg]
-COM_BIAS_OF_LOAD = 0.165*1.32                                         # load-link length * load wieght [kg*m]
 
 # ---------- use_arm & use_full parameters ----------
 # CoT actuator time constant

@@ -30,7 +30,7 @@ void MMapLogger::open() {
   if (reset_) {
     std::memset(base_, 0, map_size_);
 
-    const char kMagic[8] = {'S','T','R','L','O','G','3','\0'};
+    const char kMagic[8] = {'S','T','R','L','O','G','4','\0'};
     std::memcpy(header_->magic, kMagic, 8);
     header_->version = 3;
     header_->header_size = static_cast<uint32_t>(sizeof(MMapHeader));

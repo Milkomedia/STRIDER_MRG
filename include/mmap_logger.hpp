@@ -35,10 +35,12 @@ struct LogData {
   float vel[3]         = {0.0f}; // current velocity [m/s]
   float acc[3]         = {0.0f}; // current acceleration [m/s^2]
 
-  float rpy_raw[3]     = {0.0f}; // desired attitude (from position ctrl) [rad]
+  float rpy_raw[3]     = {0.0f}; // desired attitude raw (from position ctrl) [rad]
   float rpy_d[3]       = {0.0f}; // desired attitude reconstructed (MRG applied) [rad]
-  float omega_d[3]     = {0.0f}; // desired angular rate (from position ctrl) [rad/s]
-  float alpha_d[3]     = {0.0f}; // desired angular acceleration (from position ctrl) [rad/s^2]
+  float omega_raw[3]   = {0.0f}; // desired angular rate raw (from position ctrl) [rad/s]
+  float omega_d[3]     = {0.0f}; // desired angular rate reconstructed (MRG applied) [rad/s]
+  float alpha_raw[3]   = {0.0f}; // desired angular acceleration raw (from position ctrl) [rad/s^2]
+  float alpha_d[3]     = {0.0f}; // desired angular acceleration reconstructed (MRG applied) [rad/s^2]
   float rpy[3]         = {0.0f}; // current attitude [rad]
   float omega[3]       = {0.0f}; // current angular rate [rad/s]
   float alpha[3]       = {0.0f}; // current angular acceleration [rad/s^2]
@@ -76,7 +78,7 @@ struct LogData {
 #pragma pack(pop)
 
 // Packed size must match Python reader LOGDATA_SIZE.
-static_assert(sizeof(LogData) == 497, "LogData size changed. Update Python reader offsets/sizes.");
+static_assert(sizeof(LogData) == 521, "LogData size changed. Update Python reader offsets/sizes.");
 
 static constexpr std::size_t kLogDataBytes = sizeof(LogData);
 static constexpr std::size_t kSlotPadBytes = (8 - (kLogDataBytes % 8)) % 8; // ensure slot stride multiple of 8
@@ -87,8 +89,8 @@ static constexpr std::size_t kSlotPadBytes = (8 - (kLogDataBytes % 8)) % 8; // e
 // -----------------------------
 #pragma pack(push, 1)
 struct MMapHeader {
-  char     magic[8];      // "STRLOG3\0"
-  uint32_t version;       // 3
+  char     magic[8];      // "STRLOG4\0"
+  uint32_t version;       // 4
   uint32_t header_size;   // sizeof(MMapHeader)
   uint32_t capacity;      // number of slots
   uint32_t slot_size;     // sizeof(Slot)

@@ -26,36 +26,23 @@ static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y,
 static constexpr double kR[3]  = {50.0, 50.0,  14.0}; // Rotational gain [roll, pitch, yaw]
 static constexpr double kW[3]  = {11.0, 11.0,  5.50}; // angular Velocity gain [roll, pitch, yaw]
 
-// ===== UAV Parameter =====
-static constexpr double Jx_bar = 0.1807;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2] 
-static constexpr double Jz_bar = 0.1807;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2]
-static constexpr double M_bar  = 1.32;    // Nominal : bar 0.405 + E.E 0.17 + Box 0.43 + weight 0.315 = 1.005 [Kg]
+// ===== UAV Parameter ===== 
+static constexpr double JX_BAR = 0.08;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2] 
+static constexpr double JZ_BAR = 0.08;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2]
+static constexpr double M_BAR  = 0.575;    // Nominal : bar 0.405 + E.E 0.17 = 0.575 [Kg]
 
-static constexpr double J[9] = {    0.3 + Jx_bar, -0.0006,          -0.0006,
+static constexpr double J[9] = {    0.3 + JX_BAR, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
-                                         -0.0006,  0.0006,  0.5318 + Jz_bar}; // [kg m^2]
+                                         -0.0006,  0.0006,  0.5318 + JZ_BAR}; // [kg m^2]
 
-static constexpr double M  = 9.0 + M_bar;    // [kg]
+static constexpr double M  = 7.5 + M_BAR;     // [kg]
 static constexpr double G  = 9.80665;         // [m/s^2] (must be positive)
-
-inline constexpr double PAYLOAD_COM_OFF_X   = -0.0;   // distance from the body frame to PAYLOAD CoM position (x) [m]
-inline constexpr double PAYLOAD_COM_OFF_Y   = -0.165*0.0; // distance from the body frame to PAYLOAD CoM position (y) [m]
 
 static constexpr double SATURATION_THRUST  = 50; // (95%) Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====
-static constexpr double M_link[5] = {0.374106, 0.13658, 0.0415148, 0.102003, 0.3734}; //each link mass [kg]
-static constexpr double M_bodys = 1.4895848 + M_bar;   // center body + load mass [kg]
-
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming
 static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not tunable
-
-// ===== Filter cutoff frequencys =====
-static constexpr double GYRO_XY_CUTOFF_HZ   = 30.0;
-static constexpr double GYRO_Z_CUTOFF_HZ    =  5.0;
-static constexpr double ALPHA_LPF_CUTOFF_HZ =  5.0; // Not use in Controller (Only plot)
-static constexpr double OPTI_VEL_CUTOFF_HZ  =  4.0;
-static constexpr double ACC_LPF_CUTOFF_HZ   =  5.0; // Not use in Controller (Only plot)
 
 // ===== Various saturation parameters =====
 static constexpr double EX_NORM_MAX         = 2.0;  // position control, position error max [m]
@@ -71,10 +58,12 @@ static constexpr double MAXIMUM_THRUST_SAT  = 53.3; // sequential control alloca
 static constexpr double REACTION_TORQUE_SAT = 5.0;  // sequential control allocation, reaction torque max [Nm]
 static constexpr double TILT_ANGLE_SAT      = 25.0 * M_PI / 180.0; // sequential control allocation, tilt angle max [rad]
 
+static constexpr double DOB_TORQUE_SAT = 4.0; // DOB min/max clamping torque [N.m]
+
 // ===== SBUS command =====
 static constexpr double SBUS_X_RANGE       = 0.5;   // [m] k mapped to [-k, +k]
 static constexpr double SBUS_Y_RANGE       = 2.0;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Z_RANGE       = 1.6;   // [m] k mapped to [ 0, -k]
+static constexpr double SBUS_Z_RANGE       = 1.3;   // [m] k mapped to [ 0, -k]
 static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
 static constexpr double SBUS_COTXY_RANGE[2] = {-0.056, 0.056};  // [m]
 
@@ -82,33 +71,51 @@ static constexpr double SBUS_COTXY_RANGE[2] = {-0.056, 0.056};  // [m]
 static constexpr double OPTI_X_OFFSET  = -0.380; // [m] Opti perspective coordinate system
 static constexpr double OPTI_Y_OFFSET  = +0.430; // [m] Opti perspective coordinate system
 
-// ===== Control Frequencies =====
+// ===== Control frequencies =====
+inline constexpr double TARGET_CTRL_DT = 1.0 / 400.0;
 static constexpr std::chrono::steady_clock::duration CTRL_DT       = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(2700)); // ~370Hz
 static constexpr std::chrono::steady_clock::duration MAX_PULL_TICK = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(800));
-static constexpr std::chrono::steady_clock::duration MPC_DT        = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::microseconds(5000)); // 200Hz
+
+// ===== Filter cutoff frequencys =====
+static constexpr double DOB_CUTOFF_HZ       =  0.3; // torque DOB cutoff [Hz]
+static constexpr double ALPHA_LPF_CUTOFF_HZ =  5.0; // Not use in Controller (Only plot)
+static constexpr double OPTI_VEL_CUTOFF_HZ  =  4.0;
+static constexpr double ACC_LPF_CUTOFF_HZ   =  5.0; // Not use in Controller (Only plot)
+inline constexpr double ARM_DELAY_TAU       = 0.01; // MuJoCo actuator delay [sec]
+inline constexpr double BASE_DELAY_TAU      = 0.03; // MuJoCo actuator delay [sec]
+inline constexpr double DTHETA_LPF_CUTOFF   = 60.0; // d_theta lpf cutoff [Hz]
+
+// not a tunable parameter
+inline const     double ARM_DELAY_ALPHA  = std::exp(-TARGET_CTRL_DT / ARM_DELAY_TAU); 
+inline const     double ARM_DELAY_BETA   = 1.0 - ARM_DELAY_ALPHA;
+inline const     double BASE_DELAY_ALPHA = std::exp(-TARGET_CTRL_DT / BASE_DELAY_TAU);
+inline const     double BASE_DELAY_BETA  = 1.0 - BASE_DELAY_ALPHA;
+inline const     double DTHETA_LPF_ALPHA = std::exp(-TARGET_CTRL_DT * 2.0 * M_PI * DTHETA_LPF_CUTOFF);
+inline const     double DTHETA_LPF_BETA  = 1.0 - DTHETA_LPF_ALPHA;
 
 // ===== MPC parameters  =====
-inline constexpr double      MPC_STEP_DT = 1.0 / 75.0; // This value must be same as >> DT << on params.py
-inline constexpr std::size_t N_STEPS_REQ = 100; // This value must be less than >> N << on params.py
-inline constexpr std::size_t MPC_NX      = 22;  // This value must be same as >> self.yes_cot_nx << on solver.py
+inline constexpr double      MPC_STEP_DT = 1.0 / 400.0; // This value must be same as >> DT << on params.py
+inline constexpr std::size_t N_STEPS_REQ = 50; // This value must be less than >> N << on params.py
+inline constexpr std::size_t MPC_NX      = 14;  // This value must be same as >> self.yes_cot_nx << on solver.py
 inline constexpr std::size_t MPC_NU      = 11;  // This value must be same as >> self.yes_cot_nu << on solver.py
-inline constexpr std::size_t MPC_NP      = 25;  // This value must be same as >> self.yes_cot_np << on solver.py
+inline constexpr std::size_t MPC_NP      = 28;  // This value must be same as >> self.yes_cot_np << on solver.py
 inline constexpr std::chrono::steady_clock::duration MPC_TIMEOUT_DURATUION = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(static_cast<double>(N_STEPS_REQ-1) * MPC_STEP_DT));
 
-inline const     Eigen::Vector3d r1_init       = Eigen::Vector3d( 0.24, -0.24, -0.24); // rotor-1 inital position
-inline const     Eigen::Vector3d r2_init       = Eigen::Vector3d(-0.24, -0.24, -0.24); // rotor-2 inital position
-inline const     Eigen::Vector3d r3_init       = Eigen::Vector3d(-0.24,  0.24, -0.24); // rotor-3 inital position
-inline const     Eigen::Vector3d r4_init       = Eigen::Vector3d( 0.24,  0.24, -0.24); // rotor-4 inital position
+inline const std::array<Eigen::Vector3d, 4> INIT_R = {{
+  Eigen::Vector3d( 0.24, -0.24, -0.24), // rotor-1 initial position
+  Eigen::Vector3d(-0.24, -0.24, -0.24), // rotor-2 initial position
+  Eigen::Vector3d(-0.24,  0.24, -0.24), // rotor-3 initial position
+  Eigen::Vector3d( 0.24,  0.24, -0.24)  // rotor-4 initial position
+}};
 
 inline constexpr double MPC_OFF_TIME_CONSTANT = 10.0; // [sec] each arm goes to initial position when MPC-off or Solve-failed
-inline const     double GOES_2_ZERO_A         = std::exp(-std::chrono::duration_cast<std::chrono::duration<double>>(CTRL_DT).count() / MPC_OFF_TIME_CONSTANT); // not a tunable parameter
+inline const     double GOES_2_ZERO_A         = std::exp(-TARGET_CTRL_DT / MPC_OFF_TIME_CONSTANT); // not a tunable parameter
 inline const     double GOES_2_ZERO_B         = 1.0 - GOES_2_ZERO_A;                        // not a tunable parameter
 
 // ===== Thrust -> PWM model =====
 static constexpr double PWM_A    = 46.5435;  // propeller thrust[N] = A * pwm^2 + B
 static constexpr double PWM_B    = 8.6111;   // propeller thrust[N] = A * pwm^2 + B
 static constexpr double PWM_ZETA = 0.02;     // propeller torque[Nm] = zeta * thrust
-static constexpr double rotor_dir[4] = {1.0, -1.0, 1.0, -1.0}; // propeller torque direction
 
 // ===== Take-off parameters =====
 static constexpr double IDLE_PWM_DUTY = 0.15; // override pwm duty [0.0~1.0]
@@ -135,7 +142,12 @@ inline constexpr double B2BASE_X[4]     = { 0.12*inv_sqrt2, -0.12*inv_sqrt2, -0.
 inline constexpr double B2BASE_Y[4]     = {-0.12*inv_sqrt2, -0.12*inv_sqrt2,  0.12*inv_sqrt2,  0.12*inv_sqrt2}; // y-distance from the body frame to each base frame [m]
 static constexpr double DH_ARM_A[5]     = {0.1395, 0.115, 0.110, 0.024, 0.068};
 static constexpr double DH_ARM_ALPHA[5] = {M_PI/2.0, 0.0, 0.0, M_PI/2.0, 0.0};
-static constexpr double D_LINK[5] = {0.0995, 0.0840, 0.0550, 0.0120, 0.0480}; // link CoM distance [m]
+
+// ===== CoM estimating parameter =====
+static constexpr double M_LINK[5] = {0.374106, 0.13658, 0.0415148, 0.102003, 0.3734}; //each link mass [kg]
+static constexpr double M_CENTER  = 1.4895848 + M_BAR;                                // center body + load mass [kg]
+inline constexpr double M_IDEAL   = M_CENTER + 4.0*(M_LINK[0]+M_LINK[1]+M_LINK[2]+M_LINK[3]+M_LINK[4]); // ideal strider mass [kg]
+inline constexpr double LINK_COM_DIST[5] = {-0.040, -0.031, -0.055, -0.012, -0.020};  // link com distance [m]
 
 // ===== Path planning Parameters =====
 static inline const Eigen::Vector3d DEFAULT_pos       = Eigen::Vector3d(-OPTI_X_OFFSET, -1.0, -1.3);
