@@ -216,18 +216,28 @@ static inline Eigen::Matrix3d expm_hat(const Eigen::Vector3d& w) {
   return I + A * K + B * (K * K);
 }
 
-static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Vector3d& x_prev, const uint64_t& t_cur_ns, const uint64_t& t_prev_ns) {
+static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Vector3d& x_prev, const uint64_t& t_cur_ns, const uint64_t& t_prev_ns, Eigen::Vector3d& prev_result) {
   constexpr uint64_t MinDtNs_ = 2500000ULL;   // Maximum 400 Hz
   constexpr uint64_t MaxDtNs_ = 20000000ULL;  // Minimum 50 Hz
 
-  if (t_cur_ns <= t_prev_ns) return Eigen::Vector3d::Zero();
+  if (t_cur_ns <= t_prev_ns) 
+  {
+    printf("diff Time Err [ns] cur: %ld | prev: %ld\n", t_cur_ns , t_prev_ns);
+    return prev_result;
+  }
 
   uint64_t dt_ns = t_cur_ns - t_prev_ns;
   dt_ns = std::max(dt_ns, MinDtNs_);
-  if (dt_ns > MaxDtNs_) {return Eigen::Vector3d::Zero();}
-  
+  if (dt_ns > MaxDtNs_) {
+    printf("diff Hz drop Err [Hz] cur: %.6f | des: %.6f\n", 1.0 / (static_cast<double>(dt_ns) * 1e-9), 1.0 / (static_cast<double>(MaxDtNs_) * 1e-9));
+    double alpha = static_cast<double>(MaxDtNs_) / static_cast<double>(dt_ns);
+    // prev_result *= alpha;
+    return prev_result;
+  }
+
   const double inv_dt = 1.0 / (static_cast<double>(dt_ns) * 1e-9);
-  return (x_cur - x_prev) * inv_dt;
+  prev_result = (x_cur - x_prev) * inv_dt;
+  return prev_result;
 }
 
 static inline bool is_near(const Eigen::Vector3d& a, const Eigen::Vector3d& b, const double tol) {

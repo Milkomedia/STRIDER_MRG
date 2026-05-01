@@ -6,14 +6,14 @@ DT = 1.0 / 400.0  # [s] (of each step)
 
 # ---------- model parameters ----------
 J_TENSOR = np.array([
-    [0.438, 0.000, 0.000],
-    [0.000, 0.300, 0.000],
-    [0.000, 0.000, 0.6698]
+    [0.399433, 0.000,    0.000],
+    [0.000,    0.300,    0.000],
+    [0.000,    0.000, 0.631233]
 ], dtype=np.float64)
 
 # GAC controller gain
-KR = np.array([50.0, 50.0, 14.0])
-KW = np.array([11.0, 11.0,  5.5])
+KR = np.array([45.0, 45.0, 14.0])
+KW = np.array([12.0, 12.0,  3.5])
 
 # control allocation
 # real model uses thrust-based yaw (sequential allocation). but mpc model uses reaction-based yaw.
@@ -22,7 +22,7 @@ ZETA = 0.5
 
 # IK & CoM estimate
 M_LINK   = np.array([0.374106, 0.13658, 0.0415148, 0.102003, 0.3734]) # each link mass [kg]
-M_CENTER = 2.80958                                                    # center body 1.48958 + load mass 1.32[kg]
+M_CENTER = 2.3095848                                                  # center body 1.3145848 + load mass 0.995[kg]
 
 # ---------- use_arm & use_full parameters ----------
 # CoT actuator time constant

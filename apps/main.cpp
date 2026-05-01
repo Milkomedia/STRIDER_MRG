@@ -179,6 +179,10 @@ int main() {
   int last_mode = -1; // 0=MANUAL, 1=PATH
   int last_gate = -1; // 0=INITING, 1=INIT_DONE
 
+  Eigen::Vector3d prev_alpha = Eigen::Vector3d::Zero();
+  Eigen::Vector3d prev_vel   = Eigen::Vector3d::Zero();
+  Eigen::Vector3d prev_acc   = Eigen::Vector3d::Zero();
+
   { // --- Wait for all sensors to start ---
     std::fprintf(stdout, "\n\n\n\n ||------------------------------------||\n ||--Sensor&Connected device checking--||\n ||------[     T265 -> "); std::fflush(stdout);
     while (!g_killed.load(std::memory_order_relaxed) && !t265.read_latest(t265_frame)) {_mm_pause();}
@@ -225,7 +229,7 @@ int main() {
     const uint64_t cur_t265_cnt = t265.get_frame_count();
     if (cur_t265_cnt > last_t265_cnt) {
       const uint64_t prev_omega_ns = t265_frame.host_time_ns;
-      const Eigen::Vector3d prev_omega = s.omega;
+      const Eigen::Vector3d state_omega = s.omega;
       if (t265.read_latest(t265_frame)) {
         s.R = quat_to_R(t265_frame.quat[0], t265_frame.quat[1], t265_frame.quat[2], t265_frame.quat[3]);
         s.att = R_to_rpy(s.R);
@@ -235,7 +239,7 @@ int main() {
 
         if (prev_omega_ns == 0 || t265_frame.host_time_ns <= prev_omega_ns) { s.alpha.setZero(); } 
         else {
-          const Eigen::Vector3d alpha_raw = diff(s.omega, prev_omega, t265_frame.host_time_ns, prev_omega_ns);
+          const Eigen::Vector3d alpha_raw = diff(s.omega, state_omega, t265_frame.host_time_ns, prev_omega_ns, prev_alpha);
           s.alpha(0) = alpha_lpf[0].update(alpha_raw(0), t265_frame.host_time_ns); s.alpha(1) = alpha_lpf[1].update(alpha_raw(1), t265_frame.host_time_ns); s.alpha(2) = alpha_lpf[2].update(alpha_raw(2), t265_frame.host_time_ns);          
         }
 
@@ -247,18 +251,18 @@ int main() {
     const uint64_t cur_opti_cnt = opti.get_frame_count();
     if (cur_opti_cnt > last_opti_cnt) {
       const uint64_t prev_time_ns = opti_frame.host_time_ns;
-      const Eigen::Vector3d prev_pos = s.pos;
-      const Eigen::Vector3d prev_vel = s.vel;
+      const Eigen::Vector3d state_pos = s.pos;
+      const Eigen::Vector3d state_vel = s.vel;
       if (opti.read_latest(opti_frame)) {
         // apply frame transformation (opti uses z-up convention)
         s.pos(0)=opti_frame.pos[0]-param::OPTI_X_OFFSET; s.pos(1)=-opti_frame.pos[1]+param::OPTI_Y_OFFSET; s.pos(2)=-opti_frame.pos[2];
 
-        const Eigen::Vector3d vel_raw = diff(s.pos, prev_pos, opti_frame.host_time_ns, prev_time_ns);
+        const Eigen::Vector3d vel_raw = diff(s.pos, state_pos, opti_frame.host_time_ns, prev_time_ns, prev_vel);
         s.vel(0) = opti_vel_bf[0].update(vel_raw(0), opti_frame.host_time_ns); s.vel(1) = opti_vel_bf[1].update(vel_raw(1), opti_frame.host_time_ns); s.vel(2) = opti_vel_bf[2].update(vel_raw(2), opti_frame.host_time_ns);
 
         if (prev_time_ns == 0 || opti_frame.host_time_ns <= prev_time_ns) { s.acc.setZero(); }
         else {
-          const Eigen::Vector3d acc_raw = diff(s.vel, prev_vel, opti_frame.host_time_ns, prev_time_ns);
+          const Eigen::Vector3d acc_raw = diff(s.vel, state_vel, opti_frame.host_time_ns, prev_time_ns, prev_acc);
           s.acc(0) = acc_lpf[0].update(acc_raw(0), opti_frame.host_time_ns); s.acc(1) = acc_lpf[1].update(acc_raw(1), opti_frame.host_time_ns); s.acc(2) = acc_lpf[2].update(acc_raw(2), opti_frame.host_time_ns);
         }
 
@@ -548,7 +552,7 @@ int main() {
     const Eigen::Matrix3d Rd = R_raw * Et.transpose();
     const Eigen::Vector3d Wd = Et * omega_raw;
     const Eigen::Vector3d Wd_dot = Et * alpha_raw;
-    const Eigen::Vector3d tau_des = gac.attitude_control(Rd, Wd, Wd_dot);
+    const Eigen::Vector3d tau_des = gac.attitude_control(R_raw, Wd, Wd_dot); //delta theta 
     s.d_hat = dob_update(s.att, tau_des, dob_state);
     prev_nominal_torque = tau_des + s.d_hat;
     
@@ -695,9 +699,10 @@ int main() {
         ld.tau_off[1] = static_cast<float>(tau_off(1));
       }
       {
+        const Eigen::Vector2d tau_off(f_sum*(s.r_cot(1)-s.r_com(1)), -f_sum*(s.r_cot(0)-s.r_com(0)));
         const Eigen::Vector3d tau_thrust = Wrench_2_Torque(thrust_cmd, s.r, s.r_com);
-        ld.tau_thrust[0] = static_cast<float>(tau_thrust(0));
-        ld.tau_thrust[1] = static_cast<float>(tau_thrust(1));
+        ld.tau_thrust[0] = static_cast<float>(tau_thrust(0)-tau_off(0)); //YaMeyoung
+        ld.tau_thrust[1] = static_cast<float>(tau_thrust(1)-tau_off(1)); //YaMeyoung
         ld.tau_thrust[2] = static_cast<float>(tau_thrust(2));
       }
       ld.r_rotor1[0] = static_cast<float>(s.r[0](0));

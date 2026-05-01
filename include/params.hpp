@@ -18,25 +18,25 @@ enum class PathStage : uint8_t {
 };
 
 // ===== Geometry position control gain =====
-static constexpr double kX[3]  = {50.0, 50.0, 46.0};    // Position gain [x, y, z]
-static constexpr double kV[3]  = {19.0, 19.0, 32.0};    // Velocity gain [x, y, z]
-static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y, z]
+static constexpr double kX[3]  = {40.0, 40.0, 46.0};    // Position gain [x, y, z] 50 46
+static constexpr double kV[3]  = {15.0, 15.0, 32.0};    // Velocity gain [x, y, z] 19 32
+static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y, z] 15 30
 
 // ===== Geometry attitude control gain =====
-static constexpr double kR[3]  = {50.0, 50.0,  14.0}; // Rotational gain [roll, pitch, yaw]
-static constexpr double kW[3]  = {11.0, 11.0,  5.50}; // angular Velocity gain [roll, pitch, yaw]
+static constexpr double kR[3]  = {45.0, 45.0,  14.0}; // Rotational gain [roll, pitch, yaw]
+static constexpr double kW[3]  = {12.0, 12.0,  3.50}; // angular Velocity gain [roll, pitch, yaw]
 
 // ===== UAV Parameter ===== 
-static constexpr double JX_BAR = 0.08;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2] 
-static constexpr double JZ_BAR = 0.08;  // Nominal : bar 0.068 + payload(E.E+BOX) 0.11094 + weight 0.00177= 0.1807 [kg m^2]
-static constexpr double M_BAR  = 0.575;    // Nominal : bar 0.405 + E.E 0.17 = 0.575 [Kg]
+static constexpr double JX_BAR = 0.099433;       // Nominal : bar 0.068 + payload(E.E) 0.031433 = 0.099433 [kg m^2] 
+static constexpr double JZ_BAR = 0.099433;       // Nominal : bar 0.068 + payload(E.E) 0.031433 = 0.099433 [kg m^2]
+static constexpr double M_BAR  = 0.575+0.42;     // Nominal : bar 0.405 + E.E 0.17 = 0.575 [Kg]
 
 static constexpr double J[9] = {    0.3 + JX_BAR, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
                                          -0.0006,  0.0006,  0.5318 + JZ_BAR}; // [kg m^2]
 
-static constexpr double M  = 7.5 + M_BAR;     // [kg]
-static constexpr double G  = 9.80665;         // [m/s^2] (must be positive)
+static constexpr double M  = 5.425 + M_BAR; // [kg]
+static constexpr double G  = 9.80665;       // [m/s^2] (must be positive)
 
 static constexpr double SATURATION_THRUST  = 50; // (95%) Maximum thrust per each propeller [N]
 
@@ -48,14 +48,14 @@ static constexpr double SERVO_DELAY_BETA  = 1.0 - SERVO_DELAY_ALPHA; // this not
 static constexpr double EX_NORM_MAX         = 2.0;  // position control, position error max [m]
 static constexpr double kIX_SAT[3]          = {15.0, 15.0, 50.0}; // position control, integral max on x,y,z [N]
 
-static constexpr double ROLL_TORQUE_SAT     = 15.0;  // attitude control, torque max [Nm]
-static constexpr double PITCH_TORQUE_SAT    = 11.0;  // attitude control, torque max [Nm]
-static constexpr double YAW_TORQUE_SAT      = 5.0;  // attitude control, torque max [Nm]
+static constexpr double ROLL_TORQUE_SAT     = 8.0;  // attitude control, torque max [Nm]
+static constexpr double PITCH_TORQUE_SAT    = 8.0;  // attitude control, torque max [Nm]
+static constexpr double YAW_TORQUE_SAT      = 3.0;  // attitude control, torque max [Nm]
 static constexpr double ER_NORM_MAX         = 50.0 * M_PI / 180.0; // attitude control, attitude error max [rad]
 
-static constexpr double MINIMUM_THRUST_SAT  = 8.7;  // sequential control allocation, thrust of each prop (min 5%) [N]
-static constexpr double MAXIMUM_THRUST_SAT  = 53.3; // sequential control allocation, thrust of each prop (max 98%) [N]
-static constexpr double REACTION_TORQUE_SAT = 5.0;  // sequential control allocation, reaction torque max [Nm]
+static constexpr double MINIMUM_THRUST_SAT  = 1.6;  // sequential control allocation, thrust of each prop (min 5%) [N]
+static constexpr double MAXIMUM_THRUST_SAT  = 43.5; // sequential control allocation, thrust of each prop (max 98%) [N]
+static constexpr double REACTION_TORQUE_SAT = 3.0;  // sequential control allocation, reaction torque max [Nm]
 static constexpr double TILT_ANGLE_SAT      = 25.0 * M_PI / 180.0; // sequential control allocation, tilt angle max [rad]
 
 static constexpr double DOB_TORQUE_SAT = 4.0; // DOB min/max clamping torque [N.m]
@@ -81,9 +81,9 @@ static constexpr double DOB_CUTOFF_HZ       =  0.3; // torque DOB cutoff [Hz]
 static constexpr double ALPHA_LPF_CUTOFF_HZ =  5.0; // Not use in Controller (Only plot)
 static constexpr double OPTI_VEL_CUTOFF_HZ  =  4.0;
 static constexpr double ACC_LPF_CUTOFF_HZ   =  5.0; // Not use in Controller (Only plot)
-inline constexpr double ARM_DELAY_TAU       = 0.01; // MuJoCo actuator delay [sec]
-inline constexpr double BASE_DELAY_TAU      = 0.03; // MuJoCo actuator delay [sec]
-inline constexpr double DTHETA_LPF_CUTOFF   = 60.0; // d_theta lpf cutoff [Hz]
+inline constexpr double ARM_DELAY_TAU       =  0.03; // MuJoCo actuator delay [sec]
+inline constexpr double BASE_DELAY_TAU      =  0.05; // MuJoCo actuator delay [sec]
+inline constexpr double DTHETA_LPF_CUTOFF   =  60.0; // d_theta lpf cutoff [Hz]
 
 // not a tunable parameter
 inline const     double ARM_DELAY_ALPHA  = std::exp(-TARGET_CTRL_DT / ARM_DELAY_TAU); 
@@ -114,7 +114,7 @@ inline const     double GOES_2_ZERO_B         = 1.0 - GOES_2_ZERO_A;            
 
 // ===== Thrust -> PWM model =====
 static constexpr double PWM_A    = 46.5435;  // propeller thrust[N] = A * pwm^2 + B
-static constexpr double PWM_B    = 8.6111;   // propeller thrust[N] = A * pwm^2 + B
+static constexpr double PWM_B    = 1.5;   // propeller thrust[N] = A * pwm^2 + B
 static constexpr double PWM_ZETA = 0.02;     // propeller torque[Nm] = zeta * thrust
 
 // ===== Take-off parameters =====
