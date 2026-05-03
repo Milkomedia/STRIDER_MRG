@@ -163,7 +163,7 @@ int main() {
 
   Eigen::Vector3d prev_nominal_torque = Eigen::Vector3d::Zero();
   double rising_coeff = param::INITIAL_RISING_COEFF;
-  double saturation_thrust = param::SATURATION_THRUST;
+  double saturation_thrust = param::MAX_SAT_THRUST;
 
   // --- MPC parameters ---
   uint32_t mpc_key = 1;
@@ -358,7 +358,8 @@ int main() {
 
         // changing arm position (only GAC_ONLY)
         if (phase == Phase::GAC_ONLY || phase == Phase::ARMED || phase == Phase::IDLE) {
-          Eigen::Vector3d bPcot = Eigen::Vector3d(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]),0.0);
+          // Eigen::Vector3d bPcot = Eigen::Vector3d(sbus_cot_map(sbus_frame.ch[10]), sbus_cot_map(sbus_frame.ch[11]),0.0);
+          Eigen::Vector3d bPcot = Eigen::Vector3d(0.0, sbus_cot_map(sbus_frame.ch[11]),0.0);
           
           if (mpc_to_manual){
             const bool done =
@@ -381,8 +382,8 @@ int main() {
         if (mode_prev == 1 && PATH_ON == 0) mode_changed = 1;
         
         // For Force constrain
-        // saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10]);
-        saturation_thrust = param::SATURATION_THRUST;
+        saturation_thrust = sbus_saturation_thrust_map(sbus_frame.ch[10]);
+        // saturation_thrust = param::MAX_SAT_THRUST;
 
         if (PATH_ON != last_mode) {
           std::fprintf(stdout, PATH_ON ? "PATH generator ON\n" : "MANUAL mode ON\n");
@@ -564,6 +565,7 @@ int main() {
     // --- thruster constraint ---
     Eigen::Vector4d thrust_cmd   = Eigen::Vector4d::Zero(); // (thrust_cmd > 0)
     for (uint8_t i=0; i<4; ++i) {thrust_cmd(i) = std::clamp(thrust_des(i), 0.0, saturation_thrust);}
+    printf("SAT : %.3f | F1: %.3f F2: %.3f F3: %.3f F4: %.3f\n", saturation_thrust, thrust_des(0), thrust_des(1), thrust_des(2), thrust_des(3));
 
     // --- get joint angle commands ---
     double q_d[20] = {0};

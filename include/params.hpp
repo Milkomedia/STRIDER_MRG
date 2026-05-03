@@ -18,9 +18,9 @@ enum class PathStage : uint8_t {
 };
 
 // ===== Geometry position control gain =====
-static constexpr double kX[3]  = {40.0, 40.0, 46.0};    // Position gain [x, y, z] 50 46
-static constexpr double kV[3]  = {15.0, 15.0, 32.0};    // Velocity gain [x, y, z] 19 32
-static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y, z] 15 30
+static constexpr double kX[3]  = {50.0, 50.0, 46.0};    // Position gain [x, y, z] 
+static constexpr double kV[3]  = {19.0, 19.0, 32.0};    // Velocity gain [x, y, z] 
+static constexpr double kIX[3] = {15.0, 15.0, 30.0};     // Integral gain [x, y, z]
 
 // ===== Geometry attitude control gain =====
 static constexpr double kR[3]  = {45.0, 45.0,  14.0}; // Rotational gain [roll, pitch, yaw]
@@ -38,7 +38,8 @@ static constexpr double J[9] = {    0.3 + JX_BAR, -0.0006,          -0.0006,
 static constexpr double M  = 5.425 + M_BAR; // [kg]
 static constexpr double G  = 9.80665;       // [m/s^2] (must be positive)
 
-static constexpr double SATURATION_THRUST  = 50; // (95%) Maximum thrust per each propeller [N]
+static constexpr double MAX_SAT_THRUST  = 45; // (95%) Maximum thrust per each propeller [N]
+static constexpr double MIN_SAT_THRUST  = 20; // (5%) Maximum thrust per each propeller [N]
 
 // ===== Control Allocation =====
 static constexpr double SERVO_DELAY_ALPHA = 0.093158;  // yaw trimming

@@ -666,10 +666,9 @@ static inline double sbus_cot_map(const uint16_t ch_dial_raw) {
 static inline double sbus_saturation_thrust_map(const uint16_t ch_dial_raw) {
   const uint16_t ch_dial = std::clamp(ch_dial_raw, static_cast<uint16_t>(400), static_cast<uint16_t>(1600));
 
-  static constexpr double thrust_min = 27.0;
-  static constexpr double thrust_factor = (param::SATURATION_THRUST - thrust_min) / 1200.0;
+  static constexpr double thrust_factor = (param::MAX_SAT_THRUST - param::MIN_SAT_THRUST) / 1200.0;
 
-  return thrust_min + static_cast<double>(ch_dial - 400) * thrust_factor;
+  return param::MIN_SAT_THRUST + static_cast<double>(ch_dial - 400) * thrust_factor;
 }
 
 static inline bool sbus_path_edge(const uint16_t ch5, bool& prev_on) {
