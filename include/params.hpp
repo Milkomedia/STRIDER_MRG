@@ -35,7 +35,7 @@ static constexpr double J[9] = {    0.3 + JX_BAR, -0.0006,          -0.0006,
                                          -0.0006,     0.3,           0.0006,
                                          -0.0006,  0.0006,  0.5318 + JZ_BAR}; // [kg m^2]
 
-static constexpr double M  = 5.425 + M_BAR; // [kg]
+static constexpr double M  = 5.425 + M_BAR + 1.0; // [kg]
 static constexpr double G  = 9.80665;       // [m/s^2] (must be positive)
 
 static constexpr double MAX_SAT_THRUST  = 45; // (95%) Maximum thrust per each propeller [N]
@@ -63,14 +63,14 @@ static constexpr double DOB_TORQUE_SAT = 4.0; // DOB min/max clamping torque [N.
 
 // ===== SBUS command =====
 static constexpr double SBUS_X_RANGE       = 0.5;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Y_RANGE       = 2.0;   // [m] k mapped to [-k, +k]
-static constexpr double SBUS_Z_RANGE       = 1.3;   // [m] k mapped to [ 0, -k]
-static constexpr double SBUS_YAW_SPEED     = 20.0;  // [deg/s] @60Hz SBUS rate
+static constexpr double SBUS_Y_RANGE       = 1.5;   // [m] k mapped to [-k, +k]
+static constexpr double SBUS_Z_RANGE       = 1.6;   // [m] k mapped to [ 0, -k]
+static constexpr double SBUS_YAW_SPEED     = 0.1;  // [deg/s] @60Hz SBUS rate
 static constexpr double SBUS_COTXY_RANGE[2] = {-0.056, 0.056};  // [m]
 
 // ===== OptiTrack offsets =====
-static constexpr double OPTI_X_OFFSET  = -0.380; // [m] Opti perspective coordinate system
-static constexpr double OPTI_Y_OFFSET  = +0.430; // [m] Opti perspective coordinate system
+static constexpr double OPTI_X_OFFSET  = +0.0; // [m] Opti perspective coordinate system
+static constexpr double OPTI_Y_OFFSET  = +0.0; // [m] Opti perspective coordinate system
 
 // ===== Control frequencies =====
 inline constexpr double TARGET_CTRL_DT = 1.0 / 400.0;
@@ -151,14 +151,14 @@ inline constexpr double M_IDEAL   = M_CENTER + 4.0*(M_LINK[0]+M_LINK[1]+M_LINK[2
 inline constexpr double LINK_COM_DIST[5] = {-0.040, -0.031, -0.055, -0.012, -0.020};  // link com distance [m]
 
 // ===== Path planning Parameters =====
-static inline const Eigen::Vector3d DEFAULT_pos       = Eigen::Vector3d(-OPTI_X_OFFSET, -1.0, -1.3);
-static inline const Eigen::Vector3d Pos_L             = Eigen::Vector3d(-OPTI_X_OFFSET, -1.0, -1.3);
-static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(-OPTI_X_OFFSET, +1.0, -1.3);
+static inline const Eigen::Vector3d DEFAULT_pos       = Eigen::Vector3d(0.0, -0.3, -1.3);
+static inline const Eigen::Vector3d Pos_L             = Eigen::Vector3d(0.0, -0.3, -1.3);
+static inline const Eigen::Vector3d Pos_R             = Eigen::Vector3d(0.0, +1.7, -1.3);
 
 static constexpr double DEFAULT_POS_TOL             = 0.01;  // [m]
 static constexpr double DEFAULT_ARM_TOL             = 0.005; // [m]
-static constexpr double PATH_T_MOVE                 = 1.5; //1.5
-static constexpr double PATH_SETTLE_MAX             = 1.5;
+static constexpr double PATH_T_MOVE                 = 2.0;
+static constexpr double PATH_SETTLE_MAX             = 2.0;
 
 // ===== RT Scheduling & CPU IDs =====
 static constexpr int MAIN_PRIOR = 90;

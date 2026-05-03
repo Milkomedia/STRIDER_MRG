@@ -407,7 +407,8 @@ int main() {
           if (mode_changed) init_path_to_manual(s, cmd, mode_changed);
           else {
             cmd.pos     = smooth(cmd.pos, sbus_pos_map(sbus_frame.ch[0], sbus_frame.ch[1], sbus_frame.ch[2]), 0.1);
-            cmd.heading = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]);
+            // cmd.heading = sbus_yaw_map(cmd.yaw, sbus_frame.ch[3]);
+            cmd.heading = Eigen::Vector3d(1,0,0);;
           }
           
           if (PATH_ON != last_mode) {
@@ -565,7 +566,7 @@ int main() {
     // --- thruster constraint ---
     Eigen::Vector4d thrust_cmd   = Eigen::Vector4d::Zero(); // (thrust_cmd > 0)
     for (uint8_t i=0; i<4; ++i) {thrust_cmd(i) = std::clamp(thrust_des(i), 0.0, saturation_thrust);}
-    printf("SAT : %.3f | F1: %.3f F2: %.3f F3: %.3f F4: %.3f\n", saturation_thrust, thrust_des(0), thrust_des(1), thrust_des(2), thrust_des(3));
+    // printf("SAT : %.3f | F1: %.3f F2: %.3f F3: %.3f F4: %.3f\n", saturation_thrust, thrust_des(0), thrust_des(1), thrust_des(2), thrust_des(3));
 
     // --- get joint angle commands ---
     double q_d[20] = {0};

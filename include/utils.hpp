@@ -222,14 +222,14 @@ static inline Eigen::Vector3d diff(const Eigen::Vector3d& x_cur, const Eigen::Ve
 
   if (t_cur_ns <= t_prev_ns) 
   {
-    printf("diff Time Err [ns] cur: %ld | prev: %ld\n", t_cur_ns , t_prev_ns);
+    // printf("diff Time Err [ns] cur: %ld | prev: %ld\n", t_cur_ns , t_prev_ns);
     return prev_result;
   }
 
   uint64_t dt_ns = t_cur_ns - t_prev_ns;
   dt_ns = std::max(dt_ns, MinDtNs_);
   if (dt_ns > MaxDtNs_) {
-    printf("diff Hz drop Err [Hz] cur: %.6f | des: %.6f\n", 1.0 / (static_cast<double>(dt_ns) * 1e-9), 1.0 / (static_cast<double>(MaxDtNs_) * 1e-9));
+    // printf("diff Hz drop Err [Hz] cur: %.6f | des: %.6f\n", 1.0 / (static_cast<double>(dt_ns) * 1e-9), 1.0 / (static_cast<double>(MaxDtNs_) * 1e-9));
     double alpha = static_cast<double>(MaxDtNs_) / static_cast<double>(dt_ns);
     // prev_result *= alpha;
     return prev_result;
