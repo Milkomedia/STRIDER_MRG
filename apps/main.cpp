@@ -392,10 +392,34 @@ int main() {
 
         if (PATH_ON) {
           const bool btn_edge = sbus_path_edge(sbus_frame.ch[5], prev_btn);
+
           init_manual_to_path(s, cmd, initial_gate);
 
-          if (initial_gate) path_generator_LR(now, s, cmd, btn_edge);
-          else prev_btn = btn_edge;
+          static bool path_timer_ready = false;
+          static std::chrono::steady_clock::time_point next_path_step;
+
+          bool timer_edge = false;
+
+          if (initial_gate) {
+            if (!path_timer_ready) {
+              next_path_step = now + std::chrono::seconds(8);
+              path_timer_ready = true;
+            }
+
+            if (now >= next_path_step) {
+              timer_edge = true;
+              next_path_step = now + std::chrono::seconds(8);
+            }
+
+            // const bool path_step_edge = btn_edge || timer_edge;
+            const bool path_step_edge = btn_edge;
+
+            path_generator_LR(now, s, cmd, path_step_edge);
+          }
+          else {
+            path_timer_ready = false;
+            prev_btn = btn_edge;
+          }
 
           if (initial_gate != last_gate) {
             std::fprintf(stdout, initial_gate ? "INIT DONE\n" : "INITING...\n");
@@ -702,10 +726,10 @@ int main() {
         ld.tau_off[1] = static_cast<float>(tau_off(1));
       }
       {
-        const Eigen::Vector2d tau_off(f_sum*(s.r_cot(1)-s.r_com(1)), -f_sum*(s.r_cot(0)-s.r_com(0)));
-        const Eigen::Vector3d tau_thrust = Wrench_2_Torque(thrust_cmd, s.r, s.r_com);
-        ld.tau_thrust[0] = static_cast<float>(tau_thrust(0)-tau_off(0)); //YaMeyoung
-        ld.tau_thrust[1] = static_cast<float>(tau_thrust(1)-tau_off(1)); //YaMeyoung
+        const Eigen::Vector3d d(s.r_cot(0)-s.r_com(0), s.r_cot(1)-s.r_com(1), 0.0);
+        const Eigen::Vector3d tau_thrust = Wrench_2_Torque(thrust_cmd, s.r, d);
+        ld.tau_thrust[0] = static_cast<float>(tau_thrust(0)); //YaMeyoung
+        ld.tau_thrust[1] = static_cast<float>(tau_thrust(1)); //YaMeyoung
         ld.tau_thrust[2] = static_cast<float>(tau_thrust(2));
       }
       ld.r_rotor1[0] = static_cast<float>(s.r[0](0));
@@ -737,6 +761,9 @@ int main() {
 
       for (uint8_t i=0; i<20; ++i){ld.q[i]     = static_cast<float>(s.arm_q[i]);}
       for (uint8_t i=0; i<20; ++i){ld.q_cmd[i] = static_cast<float>(q_d[i]);}
+
+      for (uint8_t i=0; i<3; ++i){ld.d_hat[i]  = static_cast<float>(s.d_hat(i));}
+      for (uint8_t i=0; i<3; ++i){ld.pc_hat[i] = static_cast<float>(s.r_com(i));}
 
       ld.solve_ms = static_cast<float>(l_mpc_output.solve_ms);
       ld.solve_status = static_cast<int32_t>(s.last_mpc_status);

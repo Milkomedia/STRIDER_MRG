@@ -70,6 +70,10 @@ struct LogData {
   float q[20]          = {0.0f};   // current joint angle [rad]
   float q_cmd[20]      = {0.0f};   // joint angle command [rad]
 
+  float d_hat[3] = {0.0f};   // estimated torque disturbance [N.m]
+  float pc_hat[3] = {0.0f};  // estimated body to com position [m]
+
+
   float solve_ms       =  0.0f;  // acados solve time [ms]
   int32_t solve_status = -1;     // solver status (https://docs.acados.org/python_interface/index.html#acados_template.acados_ocp_options.AcadosOcpOptions.qp_solver)
   
@@ -78,7 +82,7 @@ struct LogData {
 #pragma pack(pop)
 
 // Packed size must match Python reader LOGDATA_SIZE.
-static_assert(sizeof(LogData) == 521, "LogData size changed. Update Python reader offsets/sizes.");
+static_assert(sizeof(LogData) == 545, "LogData size changed. Update Python reader offsets/sizes.");
 
 static constexpr std::size_t kLogDataBytes = sizeof(LogData);
 static constexpr std::size_t kSlotPadBytes = (8 - (kLogDataBytes % 8)) % 8; // ensure slot stride multiple of 8
